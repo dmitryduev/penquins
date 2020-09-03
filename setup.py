@@ -138,7 +138,7 @@ setup(
     name=PACKAGENAME,
     version=VERSION,
     description=DESCRIPTION,
-    py_modules=['penquins'],
+    packages=['penquins'],
     install_requires=[
         'pymongo>=3.10.1',
         'pytest>=5.3.1',
