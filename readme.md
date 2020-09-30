@@ -2,7 +2,7 @@
 
 ## Quickstart
 
-Install `penquins` from PyPI:
+Install `penquins` from [PyPI](https://pypi.org/project/penquins/):
 
 ```bash
 pip install penquins --upgrade
