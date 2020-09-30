@@ -6,6 +6,7 @@ __all__ = ['Kowalski']
 from copy import deepcopy
 from bson.json_util import loads
 from multiprocessing.pool import ThreadPool
+from netrc import netrc
 import os
 import requests
 from requests.adapters import HTTPAdapter, DEFAULT_POOLBLOCK, DEFAULT_POOLSIZE, DEFAULT_RETRIES
@@ -37,6 +38,8 @@ class Kowalski(object):
         """
             username, password, token, protocol, host, port:
                 Kowalski instance access credentials and address
+                If password is omitted, then look up default credentials from
+                the ~/.netrc file.
             pool_connections, pool_maxsize, max_retries, pool_block:
                 control requests.Session connection pool
             verbose:
@@ -44,7 +47,12 @@ class Kowalski(object):
         """
 
         if (username is None) and (password is None) and (token is None):
-            raise ValueError("Credentials not set up: provide username and either password or token")
+            raise ValueError("Missing credentials: provide either username and password or token")
+
+        if (username is not None) and (password is None):
+            netrc_auth = netrc().authenticators(host)
+            if netrc_auth:
+                username, _, password = netrc_auth
 
         # Status, Kowalski!
         self.v = verbose
@@ -57,6 +65,11 @@ class Kowalski(object):
         self.base_url = f'{self.protocol}://{self.host}:{self.port}'
 
         self.session = requests.Session()
+
+        # Prevent Requests from attempting to do HTTP basic auth using a
+        # matching username and password from the user's ~/.netrc file,
+        # because kowalski will reject all HTTP basic auth attempts.
+        self.session.trust_env = False
 
         # requests' defaults overridden?
         if (pool_connections is not None) or (pool_maxsize is not None) \
@@ -72,9 +85,8 @@ class Kowalski(object):
             self.session.mount('http://', HTTPAdapter(pool_connections=pc, pool_maxsize=pm,
                                                       max_retries=mr, pool_block=pb))
 
-        self.username = username
-
         if token is None:
+            self.username = username
             self.password = password
             self.token = self.authenticate()
         else:
@@ -82,24 +94,24 @@ class Kowalski(object):
 
         self.headers = {'Authorization': self.token}
 
-        self.methods = {'get': self.session.get,
-                        'post': self.session.post,
-                        'put': self.session.put,
-                        'patch': self.session.patch,
-                        'delete': self.session.delete}
+        self.methods = {
+            'get': self.session.get,
+            'post': self.session.post,
+            'put': self.session.put,
+            'patch': self.session.patch,
+            'delete': self.session.delete
+        }
 
     def __enter__(self):
         return self
 
     def __exit__(self, *exc):
-        # print('Finishing')
         # run shut down procedure
         self.close()
         return False
 
     def close(self):
-        """
-            Shutdown session gracefully
+        """Shutdown session gracefully
         :return:
         """
         try:
@@ -111,8 +123,7 @@ class Kowalski(object):
             return False
 
     def authenticate(self, retries: int = 3):
-        """
-            Authenticate user, return access token
+        """Authenticate user, return access token
         :return:
         """
 
@@ -167,11 +178,10 @@ class Kowalski(object):
 
             if resp.status_code == requests.codes.ok:
                 return loads(resp.text)
-            else:
-                if self.v:
-                    print('Server response: error')
-                # bad status code? sleep before retrying, maybe no connections available due to high load
-                time.sleep(0.5)
+            if self.v:
+                print('Server response: error')
+            # bad status code? sleep before retrying, maybe no connections available due to high load
+            time.sleep(0.5)
 
         raise Exception('API call failed')
 
@@ -181,8 +191,7 @@ class Kowalski(object):
         with ThreadPool(processes=n_treads) as pool:
             if self.v:
                 return list(tqdm(pool.imap(self.query, queries), total=len(queries)))
-            else:
-                return list(pool.imap(self.query, queries))
+            return list(pool.imap(self.query, queries))
 
     def query(self, query):
 
@@ -204,7 +213,8 @@ class Kowalski(object):
         for retry in range(3):
             resp = self.session.post(
                 os.path.join(self.base_url, 'api/queries'),
-                json=_query, headers=self.headers
+                json=_query,
+                headers=self.headers
             )
 
             if resp.status_code == requests.codes.ok:
@@ -221,12 +231,13 @@ class Kowalski(object):
         try:
             resp = self.session.get(
                 os.path.join(self.base_url, ''),
-                headers=self.headers, timeout=timeout)
+                headers=self.headers,
+                timeout=timeout
+            )
 
             if resp.status_code == requests.codes.ok:
                 return True
-            else:
-                return False
+            return False
 
         except Exception as _e:
             _err = traceback.format_exc()
