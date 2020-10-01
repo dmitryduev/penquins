@@ -223,6 +223,8 @@ class Kowalski(object):
                 # bad status code? sleep before retrying, maybe no connections available due to high load
                 time.sleep(0.5)
 
+        return loads(resp.text)
+
     def ping(self, timeout: int = 5) -> bool:
         """
             Ping Kowalski
