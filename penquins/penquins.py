@@ -1,6 +1,6 @@
 """ PENQUINS - Processing ENormous Queries of kowalski Users INStantaneously """
 
-__all__ = ['Kowalski']
+__all__ = ['Kowalski', '__version__']
 
 
 from copy import deepcopy
