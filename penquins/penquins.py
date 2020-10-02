@@ -210,20 +210,21 @@ class Kowalski(object):
 
                 _query['kwargs']['_id'] = _id
 
-        for retry in range(3):
+        max_retries = 3
+        for retry in range(max_retries):
             resp = self.session.post(
                 os.path.join(self.base_url, 'api/queries'),
                 json=_query,
                 headers=self.headers
             )
 
-            if resp.status_code == requests.codes.ok:
+            if resp.status_code == requests.codes.ok or retry == max_retries - 1:
                 return loads(resp.text)
             else:
                 # bad status code? sleep before retrying, maybe no connections available due to high load
                 time.sleep(0.5)
 
-        return loads(resp.text)
+        return {"status": "error", "message": "Unknown error."}
 
     def ping(self, timeout: int = 5) -> bool:
         """
