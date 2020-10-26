@@ -9,16 +9,16 @@ from multiprocessing.pool import ThreadPool
 from netrc import netrc
 import os
 import requests
-from requests.adapters import HTTPAdapter, DEFAULT_POOLBLOCK, DEFAULT_POOLSIZE, DEFAULT_RETRIES
+from requests.adapters import HTTPAdapter, DEFAULT_POOLBLOCK, DEFAULT_POOLSIZE
+from requests.packages.urllib3.util.retry import Retry
 import secrets
 import string
-import time
 import traceback
 from tqdm.auto import tqdm
 from typing import Union
 
 
-__version__ = '2.0.0'
+__version__ = '2.0.1'
 
 
 Num = Union[int, float]
@@ -26,22 +26,44 @@ QueryPart = Union['task', 'result']
 Method = Union['get', 'post', 'put', 'patch', 'delete']
 
 
-class Kowalski(object):
+DEFAULT_TIMEOUT = 5  # seconds
+DEFAULT_RETRIES = 3
+DEFAULT_BACKOFF_FACTOR = 1
+
+
+class TimeoutHTTPAdapter(HTTPAdapter):
+    def __init__(self, *args, **kwargs):
+        self.timeout = DEFAULT_TIMEOUT
+        if "timeout" in kwargs:
+            self.timeout = kwargs["timeout"]
+            del kwargs["timeout"]
+        super().__init__(*args, **kwargs)
+
+    def send(self, request, **kwargs):
+        timeout = kwargs.get("timeout")
+        if timeout is None:
+            kwargs["timeout"] = self.timeout
+        return super().send(request, **kwargs)
+
+
+class Kowalski:
     """
         Class to communicate with a Kowalski instance
     """
 
-    def __init__(self, username=None, password=None, token=None,
-                 protocol: str = 'https', host: str = 'kowalski.caltech.edu', port: int = 443,
-                 pool_connections=None, pool_maxsize=None, max_retries=None, pool_block=None,
-                 verbose: bool = False):
+    def __init__(
+            self, username=None, password=None, token=None,
+            protocol: str = 'https', host: str = 'kowalski.caltech.edu', port: int = 443,
+            verbose: bool = False,
+            **kwargs
+    ):
         """
             username, password, token, protocol, host, port:
                 Kowalski instance access credentials and address
                 If password is omitted, then look up default credentials from
                 the ~/.netrc file.
-            pool_connections, pool_maxsize, max_retries, pool_block:
-                control requests.Session connection pool
+            timeout, pool_connections, pool_maxsize, max_retries, backoff_factor, pool_block:
+                control requests.Session connection pool settings
             verbose:
                 "Status, Kowalski!"
         """
@@ -71,20 +93,31 @@ class Kowalski(object):
         # because kowalski will reject all HTTP basic auth attempts.
         self.session.trust_env = False
 
-        # requests' defaults overridden?
-        if (pool_connections is not None) or (pool_maxsize is not None) \
-                or (max_retries is not None) or (pool_block is not None):
+        # mount session adapters
+        timeout = kwargs.get("timeout", DEFAULT_TIMEOUT)
+        pool_connections = kwargs.get("pool_connections", DEFAULT_POOLSIZE)
+        pool_maxsize = kwargs.get("pool_maxsize", DEFAULT_POOLSIZE)
+        max_retries = kwargs.get("max_retries", DEFAULT_RETRIES)
+        backoff_factor = kwargs.get("backoff_factor", DEFAULT_BACKOFF_FACTOR)
+        pool_block = kwargs.get("pool_block", DEFAULT_POOLBLOCK)
 
-            pc = pool_connections if pool_connections is not None else DEFAULT_POOLSIZE
-            pm = pool_maxsize if pool_maxsize is not None else DEFAULT_POOLSIZE
-            mr = max_retries if max_retries is not None else DEFAULT_RETRIES
-            pb = pool_block if pool_block is not None else DEFAULT_POOLBLOCK
+        retries = Retry(
+            total=max_retries,
+            backoff_factor=backoff_factor,
+            status_forcelist=[405, 429, 500, 502, 503, 504],
+            method_whitelist=["HEAD", "GET", "PUT", "POST", "PATCH"]
+        )
+        adapter = TimeoutHTTPAdapter(
+            timeout=timeout,
+            max_retries=retries,
+            pool_connections=pool_connections,
+            pool_maxsize=pool_maxsize,
+            pool_block=pool_block
+        )
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
 
-            self.session.mount('https://', HTTPAdapter(pool_connections=pc, pool_maxsize=pm,
-                                                       max_retries=mr, pool_block=pb))
-            self.session.mount('http://', HTTPAdapter(pool_connections=pc, pool_maxsize=pm,
-                                                      max_retries=mr, pool_block=pb))
-
+        # set up authentication headers
         if token is None:
             self.username = username
             self.password = password
@@ -122,66 +155,56 @@ class Kowalski(object):
                 print(e)
             return False
 
-    def authenticate(self, retries: int = 3):
+    def authenticate(self):
         """Authenticate user, return access token
         :return:
         """
 
-        for retry in range(retries):
-            # post username and password, get access token
-            auth = self.session.post(
-                f'{self.base_url}/api/auth',
-                json={"username": self.username, "password": self.password, "penquins.__version__": __version__}
-            )
+        # post username and password, get access token
+        auth = self.session.post(
+            f'{self.base_url}/api/auth',
+            json={"username": self.username, "password": self.password, "penquins.__version__": __version__}
+        )
 
-            if auth.status_code == requests.codes.ok:
-                if self.v:
-                    print(auth.json())
+        if auth.status_code == requests.codes.ok:
+            if self.v:
+                print(auth.json())
 
-                if 'token' not in auth.json():
-                    print('Authentication failed')
-                    raise Exception(auth.json().get('message', 'Authentication failed'))
+            if 'token' not in auth.json():
+                print('Authentication failed')
+                raise Exception(auth.json().get('message', 'Authentication failed'))
 
-                access_token = auth.json().get('token')
+            access_token = auth.json().get('token')
 
-                if self.v:
-                    print('Successfully authenticated')
+            if self.v:
+                print('Successfully authenticated')
 
-                return access_token
-
-            else:
-                if self.v:
-                    print('Authentication failed, retrying...')
-                # bad status code? sleep before retrying, maybe no connections available due to high load
-                time.sleep(0.5)
+            return access_token
 
         raise Exception('Authentication failed')
 
-    def api(self, data: dict, endpoint: str = None, method: Method = None, timeout: Num = 30, retries: int = 3):
+    def api(self, data: dict, endpoint: str = None, method: Method = None):
 
         if endpoint is None:
             raise ValueError('Endpoint not specified')
         if method not in ['get', 'post', 'put', 'patch', 'delete']:
             raise ValueError(f'Unsupported method: {method}')
 
-        for retry in range(retries):
-            if method.lower() != 'get':
-                resp = self.methods[method.lower()](
-                    os.path.join(self.base_url, endpoint),
-                    json=data, headers=self.headers, timeout=timeout,
-                )
-            else:
-                resp = self.methods[method.lower()](
-                    os.path.join(self.base_url, endpoint),
-                    params=data, headers=self.headers, timeout=timeout,
-                )
+        if method.lower() != 'get':
+            resp = self.methods[method.lower()](
+                os.path.join(self.base_url, endpoint),
+                json=data,
+                headers=self.headers,
+            )
+        else:
+            resp = self.methods[method.lower()](
+                os.path.join(self.base_url, endpoint),
+                params=data,
+                headers=self.headers,
+            )
 
-            if resp.status_code == requests.codes.ok:
-                return loads(resp.text)
-            if self.v:
-                print('Server response: error')
-            # bad status code? sleep before retrying, maybe no connections available due to high load
-            time.sleep(0.5)
+        if resp.status_code == requests.codes.ok:
+            return loads(resp.text)
 
         raise Exception('API call failed')
 
@@ -210,23 +233,15 @@ class Kowalski(object):
 
                 _query['kwargs']['_id'] = _id
 
-        max_retries = 3
-        for retry in range(max_retries):
-            resp = self.session.post(
-                os.path.join(self.base_url, 'api/queries'),
-                json=_query,
-                headers=self.headers
-            )
+        resp = self.session.post(
+            os.path.join(self.base_url, 'api/queries'),
+            json=_query,
+            headers=self.headers
+        )
 
-            if resp.status_code == requests.codes.ok or retry == max_retries - 1:
-                return loads(resp.text)
-            else:
-                # bad status code? sleep before retrying, maybe no connections available due to high load
-                time.sleep(0.5)
+        return loads(resp.text)
 
-        return {"status": "error", "message": "Unknown error."}
-
-    def ping(self, timeout: int = 5) -> bool:
+    def ping(self) -> bool:
         """
             Ping Kowalski
         :return: True if connection ok, False otherwise
@@ -235,7 +250,6 @@ class Kowalski(object):
             resp = self.session.get(
                 os.path.join(self.base_url, ''),
                 headers=self.headers,
-                timeout=timeout
             )
 
             if resp.status_code == requests.codes.ok:
@@ -245,5 +259,6 @@ class Kowalski(object):
         except Exception as _e:
             _err = traceback.format_exc()
             if self.v:
+                print(_e)
                 print(_err)
             return False
