@@ -1,0 +1,45 @@
+name: test
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v1
+        with:
+          python-version: '3.8'
+      - name: Fetch and set up Kowalski
+        uses: actions/checkout@v2
+        with:
+          repository: dmitryduev/kowalski
+          path: kowalski
+      - name: Install Kowalski's dependencies
+        run: |
+          cd kowalski
+          python -m pip install --upgrade pip
+          pip install wheel==0.36.0
+          pip install -r requirements.txt
+      - name: Set up configs
+        run: |
+          cp config.defaults.yaml config.yaml
+          cp docker-compose.defaults.yaml docker-compose.yaml
+      - name: Build and spin up
+        run: |
+          ./kowalski.py build
+          ./kowalski.py up
+      - name: Ingest data into Kowalski and run its tests
+        run: |
+          ./kowalski.py test
+      - name: Install penquins
+        run: |
+          cd ..
+          python setup.py install
+      - name: Run penquins' tests
+        run: |
+          python -m pytest -s tests/test_penquins.py
