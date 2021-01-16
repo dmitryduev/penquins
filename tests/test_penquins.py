@@ -79,5 +79,5 @@ class TestPenquins:
         response = self.kowalski.query(query=query)
         assert "data" in response
         data = response.get("data")
-        assert len(data) == 0
+        assert len(data) > 0
         assert data[0]["objectId"] == obj_id
