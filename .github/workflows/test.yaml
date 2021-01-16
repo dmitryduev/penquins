@@ -19,26 +19,19 @@ jobs:
         with:
           repository: dmitryduev/kowalski
           path: kowalski
-      - name: Install Kowalski's dependencies
+      - name: Configure and spin up Kowalski, ingest test data
         run: |
           cd kowalski
           python -m pip install --upgrade pip
           pip install wheel==0.36.0
           pip install -r requirements.txt
-      - name: Set up configs
-        run: |
           cp config.defaults.yaml config.yaml
           cp docker-compose.defaults.yaml docker-compose.yaml
-      - name: Build and spin up
-        run: |
           ./kowalski.py build
           ./kowalski.py up
-      - name: Ingest data into Kowalski and run its tests
-        run: |
           ./kowalski.py test
       - name: Install penquins
         run: |
-          cd ..
           python setup.py install
       - name: Run penquins' tests
         run: |
