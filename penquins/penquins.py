@@ -15,7 +15,7 @@ import secrets
 import string
 import traceback
 from tqdm.auto import tqdm
-from typing import Union
+from typing import Optional, Union
 
 
 __version__ = "2.0.2"
@@ -24,9 +24,9 @@ __version__ = "2.0.2"
 Num = Union[int, float]
 
 
-DEFAULT_TIMEOUT = 5  # seconds
-DEFAULT_RETRIES = 3
-DEFAULT_BACKOFF_FACTOR = 1
+DEFAULT_TIMEOUT: int = 5  # seconds
+DEFAULT_RETRIES: int = 3
+DEFAULT_BACKOFF_FACTOR: int = 1
 
 
 class TimeoutHTTPAdapter(HTTPAdapter):
@@ -51,9 +51,9 @@ class Kowalski:
 
     def __init__(
         self,
-        username=None,
-        password=None,
-        token=None,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        token: Optional[str] = None,
         protocol: str = "https",
         host: str = "kowalski.caltech.edu",
         port: int = 443,
