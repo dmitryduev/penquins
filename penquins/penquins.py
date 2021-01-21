@@ -38,10 +38,13 @@ class TimeoutHTTPAdapter(HTTPAdapter):
         super().__init__(*args, **kwargs)
 
     def send(self, request, **kwargs):
-        timeout = kwargs.get("timeout")
-        if timeout is None:
-            kwargs["timeout"] = self.timeout
-        return super().send(request, **kwargs)
+        try:
+            timeout = kwargs.get("timeout")
+            if timeout is None:
+                kwargs["timeout"] = self.timeout
+            return super().send(request, **kwargs)
+        except AttributeError:
+            kwargs["timeout"] = DEFAULT_TIMEOUT
 
 
 class Kowalski:
