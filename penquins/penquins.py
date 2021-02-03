@@ -15,7 +15,7 @@ import secrets
 import string
 import traceback
 from tqdm.auto import tqdm
-from typing import Optional, Union
+from typing import Mapping, Optional, Sequence, Union
 
 
 __version__ = "2.0.2"
@@ -48,9 +48,7 @@ class TimeoutHTTPAdapter(HTTPAdapter):
 
 
 class Kowalski:
-    """
-    Class to communicate with a Kowalski instance
-    """
+    """Class to communicate with a Kowalski instance"""
 
     def __init__(
         self,
@@ -195,32 +193,39 @@ class Kowalski:
 
         raise Exception("Authentication failed")
 
-    def api(self, data: dict, endpoint: str = None, method: str = None):
+    def api(self, method: str, endpoint: str, data: Optional[Mapping] = None):
+        """Call API endpoint on Kowalski"""
+        method = method.lower()
+        # allow using both "/<path>/<endpoint>" and "<path>/<endpoint>"
+        endpoint = endpoint[1:] if endpoint.startswith("/") else endpoint
 
         if endpoint is None:
             raise ValueError("Endpoint not specified")
         if method not in ["get", "post", "put", "patch", "delete"]:
             raise ValueError(f"Unsupported method: {method}")
 
-        if method.lower() != "get":
-            resp = self.methods[method.lower()](
+        if method != "get":
+            resp = self.methods[method](
                 os.path.join(self.base_url, endpoint),
                 json=data,
                 headers=self.headers,
             )
         else:
-            resp = self.methods[method.lower()](
+            resp = self.methods[method](
                 os.path.join(self.base_url, endpoint),
                 params=data,
                 headers=self.headers,
             )
 
-        if resp.status_code == requests.codes.ok:
-            return loads(resp.text)
+        return loads(resp.text)
 
-        raise Exception("API call failed")
+    def batch_query(self, queries: Sequence[Mapping], n_treads: int = 4):
+        """Call Kowalski's /api/queries endpoint using multiple processes
 
-    def batch_query(self, queries, n_treads: int = 4):
+        :param queries: sequence of queries
+        :param n_treads: number of processes to use
+        :return:
+        """
         n_treads = min(len(queries), n_treads)
 
         with ThreadPool(processes=n_treads) as pool:
@@ -228,8 +233,12 @@ class Kowalski:
                 return list(tqdm(pool.imap(self.query, queries), total=len(queries)))
             return list(pool.imap(self.query, queries))
 
-    def query(self, query):
+    def query(self, query: Mapping):
+        """Call Kowalski's /api/queries endpoint using multiple processes
 
+        :param query: query mapping
+        :return:
+        """
         _query = deepcopy(query)
 
         # by default, all queries are not registered in the db and the task/results are stored on disk as json files
@@ -257,9 +266,9 @@ class Kowalski:
         return loads(resp.text)
 
     def ping(self) -> bool:
-        """
-            Ping Kowalski
-        :return: True if connection ok, False otherwise
+        """Ping Kowalski
+
+        :return: True if connection is ok, False otherwise
         """
         try:
             resp = self.session.get(

@@ -27,8 +27,7 @@ jobs:
           pip install -r requirements.txt
           cp config.defaults.yaml config.yaml
           cp docker-compose.defaults.yaml docker-compose.yaml
-          ./kowalski.py build
-          ./kowalski.py up
+          ./kowalski.py up --build
           ./kowalski.py test
       - name: Install penquins
         run: |
