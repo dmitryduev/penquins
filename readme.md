@@ -82,6 +82,9 @@ query = {
         "limit": 7,
     },
 }
+
+response = k.query(query=query)
+data = response.get("data")
 ```
 
 Run a `cone_search` query:
