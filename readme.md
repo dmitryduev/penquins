@@ -51,7 +51,7 @@ Retrieve available catalog names:
 
 ```python
 query = {
-    "query_type": "info", 
+    "query_type": "info",
     "query": {
         "command": "catalog_names",
     }
@@ -140,7 +140,7 @@ q = {
     }
 }
 
-r = k.query(q)
+r = k.query(query=q)
 data = r.get("data")
 ```
 
