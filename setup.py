@@ -151,7 +151,7 @@ setup(
     install_requires=[
         "pymongo>=3.10.1",
         "pytest>=5.3.1",
-        "requests>=2.23.0",
+        "requests>=2.25.0",
         "tqdm>=4.46.0",
     ],
     author=AUTHOR,
