@@ -91,6 +91,46 @@ response = kowalski.query(query=query)
 data = response.get("data")
 ```
 
+Retrieve available catalog names:
+
+```python
+query = {
+    "query_type": "info",
+    "query": {
+        "command": "catalog_names",
+    }
+}
+
+response = k.query(query=query)
+data = response.get("data")
+```
+
+Query for 7 nearest sources to a sky position, sorted by the spheric distance, with a `near` query:
+
+```python
+query = {
+    "query_type": "near",
+    "query": {
+        "max_distance": 2,
+        "distance_units": "arcsec",
+        "radec": {"query_coords": [281.15902595, -4.4160933]},
+        "catalogs": {
+            "ZTF_sources_20210401": {
+                "filter": {},
+                "projection": {"_id": 1},
+            }
+        },
+    },
+    "kwargs": {
+        "max_time_ms": 10000,
+        "limit": 7,
+    },
+}
+
+response = k.query(query=query)
+data = response.get("data")
+```
+
 Run a `cone_search` query:
 
 ```python

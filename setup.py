@@ -134,7 +134,7 @@ LICENSE = "MIT"
 URL = "https://github.com/dmitryduev/penquins"
 
 # VERSION should be PEP386 compatible (http://www.python.org/dev/peps/pep-0386)
-VERSION = "2.0.2"
+VERSION = "2.1.0"
 
 # Indicates if this version is a release version
 RELEASE = "dev" not in VERSION
@@ -151,7 +151,7 @@ setup(
     install_requires=[
         "pymongo>=3.10.1",
         "pytest>=5.3.1",
-        "requests>=2.23.0",
+        "requests>=2.25.0",
         "tqdm>=4.46.0",
     ],
     author=AUTHOR,
