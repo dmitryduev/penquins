@@ -1,6 +1,6 @@
 # penquins: a python client for [Kowalski](https://github.com/dmitryduev/kowalski)
 
-[![DOI](https://zenodo.org/badge/265066748.svg)](https://zenodo.org/badge/latestdoi/265066748)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.5651471.svg)](https://doi.org/10.5281/zenodo.5651471)
 
 `penquins` is a python client for [Kowalski](https://github.com/dmitryduev/kowalski), a multi-survey data archive and alert broker for time-domain astronomy.
 
