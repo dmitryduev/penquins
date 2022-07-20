@@ -111,7 +111,7 @@ class Kowalski:
             total=max_retries,
             backoff_factor=backoff_factor,
             status_forcelist=[405, 429, 500, 502, 503, 504],
-            method_whitelist=["HEAD", "GET", "PUT", "POST", "PATCH"],
+            allowed_methods=["HEAD", "GET", "PUT", "POST", "PATCH"],
         )
         adapter = TimeoutHTTPAdapter(
             timeout=timeout,
