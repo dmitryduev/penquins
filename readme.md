@@ -237,3 +237,22 @@ response = kowalski.api(method="post", endpoint="/api/users", data=request)
 
 response = kowalski.api(method="delete", endpoint=f"/api/users/{username}")
 ```
+
+## Publish new version
+
+Please refer to https://realpython.com/pypi-publish-python-package/
+for a detailed guide.
+
+```shell script
+pip install bumpversion
+export PENQUINS_VERSION=2.2.0
+
+bumpversion --current-version $PENQUINS_VERSION minor setup.py penquins/penquins.py
+python setup.py sdist bdist_wheel
+
+twine check dist/*$PENQUINS_VERSION*
+twine upload dist/*$PENQUINS_VERSION*
+
+username: __token__
+token: <TOKEN>
+```
