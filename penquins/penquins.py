@@ -18,7 +18,7 @@ from tqdm.auto import tqdm
 from typing import Mapping, Optional, Sequence, Union
 
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 
 Num = Union[int, float]

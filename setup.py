@@ -134,7 +134,7 @@ LICENSE = "MIT"
 URL = "https://github.com/dmitryduev/penquins"
 
 # VERSION should be PEP386 compatible (http://www.python.org/dev/peps/pep-0386)
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 
 # Indicates if this version is a release version
 RELEASE = "dev" not in VERSION
