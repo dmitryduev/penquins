@@ -215,6 +215,23 @@ queries = [
 responses = kowalski.batch_query(queries=queries, n_treads=4)
 ```
 
+Track and query multiple Kowalski instances at once:
+
+```python
+tokens = {
+    "kowalski": "",
+    "gloria": "",
+    "melman": ""
+ }
+
+instances = construct_instances(tokens=tokens)
+instance = KowalskiInstances(instances=instances)
+
+query = {"query_type": "estimated_document_count",
+         "query": {"catalog": "ZTF_source_classifications_DR5"}}
+query_result = instance.query(query)
+```
+
 ### Interacting with the API
 
 Users can interact with [Kowalski's API](https://kowalski.caltech.edu/docs/api/)

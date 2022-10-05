@@ -286,3 +286,168 @@ class Kowalski:
                 print(_e)
                 print(_err)
             return False
+
+
+def construct_instances(tokens: dict = {}, usernames: dict = {}, passwords: dict = {}):
+    """Construct Kowalski instances for kowalwski, gloria and melman machines
+
+    :param tokens: dictionary of tokens (keys = 'kowalski', 'gloria', 'melman')
+    :param usernames: if not using tokens to authenticate, dictionary of usernames (single username with any key, or three keys = 'kowalski', 'gloria', 'melman')
+    :param passwords: if not using tokens to authenticate, dictionary of passwords (single username with any key, or three keys = 'kowalski', 'gloria', 'melman')
+    :return: list of authenticated Kowalski instances
+    """
+
+    # Uncomment below to hardcode tokens
+
+    # hardcoded_tokens = {
+    #    "kowalski": "",
+    #    "gloria": "",
+    #    "melman": ""
+    # }
+    # tokens = hardcoded_tokens
+    #
+
+    # Uncomment below to hardcode usernames/passwords
+
+    # hardcoded_usernames = {
+    #    "kowalski": "",
+    #    "gloria": "",
+    #    "melman": ""
+    # }
+    # usernames = hardcoded_usernames
+
+    # hardcoded_passwords = {
+    #    "kowalski": "",
+    #    "gloria": "",
+    #    "melman": ""
+    # }
+    # passwords = hardcoded_passwords
+
+    #
+
+    # Start by checking token dictionary, require 3 tokens
+    if len(tokens) > 0:
+        if len(tokens) < 3:
+            raise ValueError("Please provide tokens for kowalski, gloria and melman.")
+
+        tokenkeys = [x for x in tokens.keys()]
+        if not (
+            ("kowalski" in tokenkeys)
+            & ("gloria" in tokenkeys)
+            & ("melman" in tokenkeys)
+        ):
+            raise ValueError(
+                'Please label keys in tokens dictionary as "kowalski", "gloria" and "melman".'
+            )
+
+        kowalski = Kowalski(token=tokens["kowalski"], host="kowalski.caltech.edu")
+        gloria = Kowalski(token=tokens["gloria"], host="gloria.caltech.edu")
+        melman = Kowalski(token=tokens["melman"], host="melman.caltech.edu")
+
+    # If no tokens, continue with usernames/passwords
+    else:
+        if (len(usernames) == 0) | (len(passwords) == 0):
+            raise ValueError("Please provide tokens or username/password.")
+
+        # Allow single username/password under any key
+        if (len(usernames) == 1) & (len(passwords) == 1):
+            print("Using single username and password for all machines.")
+            uname = [x for x in usernames.values()][0]
+            pword = [x for x in passwords.values()][0]
+            usernames = {}
+            passwords = {}
+            usernames["kowalski"], usernames["gloria"], usernames["melman"] = (
+                uname,
+                uname,
+                uname,
+            )
+            passwords["kowalski"], passwords["gloria"], passwords["melman"] = (
+                pword,
+                pword,
+                pword,
+            )
+
+        else:
+            unamekeys = [x for x in usernames.keys()]
+            if not (
+                ("kowalski" in unamekeys)
+                & ("gloria" in unamekeys)
+                & ("melman" in unamekeys)
+            ):
+                raise ValueError(
+                    'Please label keys in usernames dictionary as "kowalski", "gloria" and "melman".'
+                )
+
+            pwordkeys = [x for x in passwords.keys()]
+            if not (
+                ("kowalski" in pwordkeys)
+                & ("gloria" in pwordkeys)
+                & ("melman" in pwordkeys)
+            ):
+                raise ValueError(
+                    'Please label keys in passwords dictionary as "kowalski", "gloria" and "melman".'
+                )
+
+        kowalski = Kowalski(
+            username=usernames["kowalski"],
+            password=passwords["kowalski"],
+            host="kowalski.caltech.edu",
+        )
+        gloria = Kowalski(
+            username=usernames["gloria"],
+            password=passwords["gloria"],
+            host="gloria.caltech.edu",
+        )
+        melman = Kowalski(
+            username=usernames["melman"],
+            password=passwords["melman"],
+            host="melman.caltech.edu",
+        )
+
+    instances = [kowalski, gloria, melman]
+
+    return instances
+
+
+class KowalskiInstances:
+    """A model for a single interface for
+    querying multiple Kowalski instances.
+
+    Parameters
+    ----------
+    instances: List[penquins.Kowalski]
+        List of Kowalski instances
+    """
+
+    def __init__(
+        self,
+        instances=[],
+    ):
+
+        self.instances = instances
+        self.catalogs = self.get_catalogs()
+
+    def get_catalogs(self):
+        query = {
+            "query_type": "info",
+            "query": {
+                "command": "catalog_names",
+            },
+        }
+
+        catalogs = {}
+        for instance in self.instances:
+            response = instance.query(query=query)
+            data = response.get("data")
+            catalogs[instance.host] = data
+
+        return catalogs
+
+    def query(self, query):
+
+        catalog_name = query["query"]["catalog"]
+        for instance in self.instances:
+            if catalog_name in self.catalogs[instance.host]:
+                return instance.query(query)
+
+        return None
