@@ -1,3 +1,5 @@
+import os
+
 import pytest
 import random
 
@@ -155,3 +157,31 @@ class TestPenquins:
         )
         assert response["status"] == "success"
         assert response["message"] == f"Removed filter id {filter_id}"
+
+    def test_query_cone_search_from_skymap(self):
+        n_treads = 8
+        filename = "localization.fits"
+        path = os.path.join(os.path.dirname(__file__), "data", filename)
+
+        cumprob = 0.1
+        start_date = "2019-01-01"
+        end_date = "2020-01-02"
+        min_nb_detections = 5
+        catalogs = ["ZTF_alerts"]
+        program_id = 1
+
+        candidates_in_skymap = self.kowalski.query_skymap(
+            path,
+            cumprob,
+            start_date,
+            end_date,
+            min_nb_detections,
+            catalogs,
+            program_id,
+            n_treads,
+        )
+
+        assert len(candidates_in_skymap) > 0
+        for catalog in catalogs:
+            assert catalog in candidates_in_skymap.keys()
+            assert len(candidates_in_skymap[catalog]) > 0
