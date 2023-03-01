@@ -347,6 +347,12 @@ class Kowalski:
 
         cones = get_cones(path, cumprob)
 
+        if isinstance(projection_kwargs, dict):
+            if projection_kwargs.get("candid", 1) == 0:
+                raise ValueError(
+                    "candid cannot be excluded from projection. Do not set it to 0."
+                )
+
         filter = {
             "candidate.jd": {"$gt": jd_start, "$lt": jd_end},
             "candidate.jdstarthist": {
