@@ -3,20 +3,26 @@
 __all__ = ["Kowalski", "__version__"]
 
 
-from copy import deepcopy
-from bson.json_util import loads
-from multiprocessing.pool import ThreadPool
-from netrc import netrc
 import os
-import requests
-from requests.adapters import HTTPAdapter, DEFAULT_POOLBLOCK, DEFAULT_POOLSIZE
-from requests.packages.urllib3.util.retry import Retry
 import secrets
 import string
 import traceback
-from tqdm.auto import tqdm
-from typing import Mapping, Optional, Sequence, Union
+from copy import deepcopy
+from multiprocessing.pool import ThreadPool
+from netrc import netrc
+from pathlib import Path
+from typing import List, Mapping, Optional, Sequence, Union
 
+import astropy.units as u
+import astropy_healpix as ah
+import healpy as hp
+import requests
+from astropy.io import fits
+from bson.json_util import loads
+from mocpy import MOC
+from requests.adapters import DEFAULT_POOLBLOCK, DEFAULT_POOLSIZE, HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
+from tqdm.auto import tqdm
 
 __version__ = "2.2.0"
 
@@ -27,6 +33,31 @@ Num = Union[int, float]
 DEFAULT_TIMEOUT: int = 5  # seconds
 DEFAULT_RETRIES: int = 3
 DEFAULT_BACKOFF_FACTOR: int = 1
+
+
+def get_cones(path, cumprob):  # path or file-like object
+    max_order = None
+    with fits.open(path) as hdul:
+        hdul[1].columns
+        data = hdul[1].data
+        max_order = hdul[1].header["MOCORDER"]
+
+    uniq = data["UNIQ"]
+    probdensity = data["PROBDENSITY"]
+
+    level, _ = ah.uniq_to_level_ipix(uniq)
+    area = ah.nside_to_pixel_area(ah.level_to_nside(level)).to_value(u.steradian)
+    prob = probdensity * area
+
+    moc = MOC.from_valued_healpix_cells(uniq, prob, max_order, cumul_to=cumprob)
+    moc_json = moc.serialize(format="json")
+    cones = []
+    for order, values in moc_json.items():
+        for value in values:
+            ra, dec = hp.pix2ang(2 ** int(order), int(value), lonlat=True, nest=True)
+            r = hp.max_pixrad(2 ** int(order), degrees=True)
+            cones.append([ra, dec, r])
+    return cones
 
 
 class TimeoutHTTPAdapter(HTTPAdapter):
@@ -286,3 +317,116 @@ class Kowalski:
                 print(_e)
                 print(_err)
             return False
+
+    def query_skymap(
+        self,
+        path: Path,  # path or file-like object
+        cumprob: float,
+        jd_start: float,
+        jd_end: float,
+        catalogs: List[str],
+        program_ids: List[int],
+        filter_kwargs: Optional[Mapping] = dict(),
+        projection_kwargs: Optional[Mapping] = dict(),
+        n_treads: int = 4,
+    ) -> List[dict]:
+        missing_args = [
+            arg
+            for arg in [
+                path,
+                cumprob,
+                jd_start,
+                jd_end,
+                catalogs,
+                program_ids,
+            ]
+            if arg is None
+        ]
+        if len(missing_args) > 0:
+            raise ValueError(f"Missing arguments: {missing_args}")
+
+        cones = get_cones(path, cumprob)
+
+        if isinstance(projection_kwargs, dict):
+            if projection_kwargs.get("candid", 1) == 0:
+                raise ValueError(
+                    "candid cannot be excluded from projection. Do not set it to 0."
+                )
+
+        filter = {
+            "candidate.jd": {"$gt": jd_start, "$lt": jd_end},
+            "candidate.jdstarthist": {
+                "$gt": jd_start,
+                "$lt": jd_end,
+            },
+            "candidate.jdendhist": {
+                "$gt": jd_start,
+                "$lt": jd_end,
+            },
+            "candidate.programid": {
+                "$in": program_ids
+            },  # 1 = ZTF Public, 2 = ZTF Public+Partnership, 3 = ZTF Public+Partnership+Caltech
+        }
+
+        for k in filter_kwargs.keys():
+            filter[k] = filter_kwargs[k]
+
+        projection = {
+            "_id": 0,
+            "candid": 1,
+            "objectId": 1,
+            "candidate.ra": 1,
+            "candidate.dec": 1,
+            "candidate.jd": 1,
+            "candidate.jdendhist": 1,
+            "candidate.magpsf": 1,
+            "candidate.sigmapsf": 1,
+        }
+
+        for k in projection_kwargs.keys():
+            projection[k] = projection_kwargs[k]
+
+        queries = []
+        for cone in cones:
+            query = {
+                "query_type": "cone_search",
+                "query": {
+                    "object_coordinates": {
+                        "cone_search_radius": cone[2],
+                        "cone_search_unit": "deg",
+                        "radec": {"object": [cone[0], cone[1]]},
+                    },
+                    "catalogs": {
+                        catalog: {
+                            "filter": filter,
+                            "projection": projection,
+                        }
+                        for catalog in catalogs
+                    },
+                },
+            }
+
+            queries.append(query)
+
+        response = self.batch_query(queries=queries, n_treads=n_treads)
+        candidates_per_catalogs = {catalog: [] for catalog in catalogs}
+
+        for r in response:
+            data = r.get("data", None)
+            if data is None:
+                continue
+            for catalog in catalogs:
+                candidates_per_catalogs[catalog].extend(data[catalog]["object"])
+
+        if not all(
+            [
+                len(candidates_per_catalogs[catalog]) > 0
+                for catalog in candidates_per_catalogs.keys()
+            ]
+        ):
+            candidates_per_catalogs = {
+                catalog: list({c["candid"]: c for c in candidates}.values())
+                for catalog, candidates in candidates_per_catalogs.items()
+            }  # remove duplicates
+
+        return candidates_per_catalogs

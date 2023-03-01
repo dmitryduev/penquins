@@ -1,3 +1,6 @@
+import os
+
+from astropy.time import Time
 import pytest
 import random
 
@@ -16,7 +19,12 @@ def kowalski_fixture(request):
     )
 
     request.cls.kowalski = Kowalski(
-        username=username, password=password, protocol=protocol, host=host, port=port
+        username=username,
+        password=password,
+        protocol=protocol,
+        host=host,
+        port=port,
+        verbose=True,
     )
 
 
@@ -155,3 +163,46 @@ class TestPenquins:
         )
         assert response["status"] == "success"
         assert response["message"] == f"Removed filter id {filter_id}"
+
+    def test_query_cone_search_from_skymap(self):
+        n_treads = 8
+        filename = "localization.fits"
+        path = os.path.join(os.path.dirname(__file__), "data", filename)
+
+        cumprob = 0.7
+        jd_start = Time("2019-01-01").jd
+        jd_end = Time("2020-01-02").jd
+        catalogs = ["ZTF_alerts"]
+        program_ids = [1]
+
+        filter_kwargs = {
+            "candidate.drb": {"$gt": 0.8},
+            "candidate.ndethist": {"$gt": 1},
+        }
+
+        projection_kwargs = {
+            "candidate.isdiffpos": 1,
+        }
+
+        candidates_in_skymap = self.kowalski.query_skymap(
+            path,
+            cumprob,
+            jd_start,
+            jd_end,
+            catalogs,
+            program_ids,
+            filter_kwargs,
+            projection_kwargs,
+            n_treads=n_treads,
+        )
+
+        assert len(candidates_in_skymap.keys()) > 0
+        for catalog in catalogs:
+            assert catalog in candidates_in_skymap.keys()
+            assert len(candidates_in_skymap[catalog]) > 0
+            assert all(
+                [
+                    "isdiffpos" in candidate["candidate"].keys()
+                    for candidate in candidates_in_skymap[catalog]
+                ]
+            )
