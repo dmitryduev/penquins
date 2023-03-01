@@ -1,5 +1,6 @@
 import os
 
+from astropy.time import Time
 import pytest
 import random
 
@@ -169,8 +170,8 @@ class TestPenquins:
         path = os.path.join(os.path.dirname(__file__), "data", filename)
 
         cumprob = 0.7
-        start_date = "2019-01-01"
-        end_date = "2020-01-02"
+        jd_start = Time("2019-01-01").jd
+        jd_end = Time("2020-01-02").jd
         catalogs = ["ZTF_alerts"]
         program_ids = [1]
 
@@ -186,8 +187,8 @@ class TestPenquins:
         candidates_in_skymap = self.kowalski.query_skymap(
             path,
             cumprob,
-            start_date,
-            end_date,
+            jd_start,
+            jd_end,
             catalogs,
             program_ids,
             filter_kwargs,
@@ -195,7 +196,7 @@ class TestPenquins:
             n_treads=n_treads,
         )
 
-        assert len(candidates_in_skymap) > 0
+        assert len(candidates_in_skymap.keys()) > 0
         for catalog in catalogs:
             assert catalog in candidates_in_skymap.keys()
             assert len(candidates_in_skymap[catalog]) > 0

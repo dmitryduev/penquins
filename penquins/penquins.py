@@ -4,13 +4,13 @@ __all__ = ["Kowalski", "__version__"]
 
 
 import os
-from pathlib import Path
 import secrets
 import string
 import traceback
 from copy import deepcopy
 from multiprocessing.pool import ThreadPool
 from netrc import netrc
+from pathlib import Path
 from typing import List, Mapping, Optional, Sequence, Union
 
 import astropy.units as u
@@ -18,7 +18,6 @@ import astropy_healpix as ah
 import healpy as hp
 import requests
 from astropy.io import fits
-from astropy.time import Time
 from bson.json_util import loads
 from mocpy import MOC
 from requests.adapters import DEFAULT_POOLBLOCK, DEFAULT_POOLSIZE, HTTPAdapter
@@ -36,7 +35,7 @@ DEFAULT_RETRIES: int = 3
 DEFAULT_BACKOFF_FACTOR: int = 1
 
 
-def get_cones(path, cumprob):
+def get_cones(path, cumprob):  # path or file-like object
     max_order = None
     with fits.open(path) as hdul:
         hdul[1].columns
@@ -321,23 +320,23 @@ class Kowalski:
 
     def query_skymap(
         self,
-        path: Path,
+        path: Path,  # path or file-like object
         cumprob: float,
-        start_date: str,
-        end_date: str,
+        jd_start: float,
+        jd_end: float,
         catalogs: List[str],
         program_ids: List[int],
         filter_kwargs: Optional[Mapping] = dict(),
         projection_kwargs: Optional[Mapping] = dict(),
-        n_treads=6,
+        n_treads: int = 4,
     ) -> List[dict]:
         missing_args = [
             arg
             for arg in [
                 path,
                 cumprob,
-                start_date,
-                end_date,
+                jd_start,
+                jd_end,
                 catalogs,
                 program_ids,
             ]
@@ -347,8 +346,6 @@ class Kowalski:
             raise ValueError(f"Missing arguments: {missing_args}")
 
         cones = get_cones(path, cumprob)
-        jd_start = Time(start_date).jd
-        jd_end = Time(end_date).jd
 
         filter = {
             "candidate.jd": {"$gt": jd_start, "$lt": jd_end},
