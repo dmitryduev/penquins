@@ -18,7 +18,12 @@ def kowalski_fixture(request):
     )
 
     request.cls.kowalski = Kowalski(
-        username=username, password=password, protocol=protocol, host=host, port=port
+        username=username,
+        password=password,
+        protocol=protocol,
+        host=host,
+        port=port,
+        verbose=True,
     )
 
 
@@ -163,27 +168,40 @@ class TestPenquins:
         filename = "localization.fits"
         path = os.path.join(os.path.dirname(__file__), "data", filename)
 
-        cumprob = 0.5
+        cumprob = 0.7
         start_date = "2019-01-01"
         end_date = "2020-01-02"
-        min_nb_detections = 5
-        drb = 0.8
         catalogs = ["ZTF_alerts"]
         program_ids = [1]
+
+        filter_kwargs = {
+            "candidate.drb": {"$gt": 0.8},
+            "candidate.ndethist": {"$gt": 1},
+        }
+
+        projection_kwargs = {
+            "candidate.isdiffpos": 1,
+        }
 
         candidates_in_skymap = self.kowalski.query_skymap(
             path,
             cumprob,
             start_date,
             end_date,
-            min_nb_detections,
-            drb,
             catalogs,
             program_ids,
-            n_treads,
+            filter_kwargs,
+            projection_kwargs,
+            n_treads=n_treads,
         )
 
         assert len(candidates_in_skymap) > 0
         for catalog in catalogs:
             assert catalog in candidates_in_skymap.keys()
             assert len(candidates_in_skymap[catalog]) > 0
+            assert all(
+                [
+                    "isdiffpos" in candidate["candidate"].keys()
+                    for candidate in candidates_in_skymap[catalog]
+                ]
+            )

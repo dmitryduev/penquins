@@ -325,10 +325,10 @@ class Kowalski:
         cumprob: float,
         start_date: str,
         end_date: str,
-        min_detections: int,
-        drb: float,
         catalogs: List[str],
         program_ids: List[int],
+        filter_kwargs: Optional[Mapping] = dict(),
+        projection_kwargs: Optional[Mapping] = dict(),
         n_treads=6,
     ) -> List[dict]:
         missing_args = [
@@ -338,8 +338,6 @@ class Kowalski:
                 cumprob,
                 start_date,
                 end_date,
-                min_detections,
-                drb,
                 catalogs,
                 program_ids,
             ]
@@ -351,6 +349,39 @@ class Kowalski:
         cones = get_cones(path, cumprob)
         jd_start = Time(start_date).jd
         jd_end = Time(end_date).jd
+
+        filter = {
+            "candidate.jd": {"$gt": jd_start, "$lt": jd_end},
+            "candidate.jdstarthist": {
+                "$gt": jd_start,
+                "$lt": jd_end,
+            },
+            "candidate.jdendhist": {
+                "$gt": jd_start,
+                "$lt": jd_end,
+            },
+            "candidate.programid": {
+                "$in": program_ids
+            },  # 1 = ZTF Public, 2 = ZTF Public+Partnership, 3 = ZTF Public+Partnership+Caltech
+        }
+
+        for k in filter_kwargs.keys():
+            filter[k] = filter_kwargs[k]
+
+        projection = {
+            "_id": 0,
+            "candid": 1,
+            "objectId": 1,
+            "candidate.ra": 1,
+            "candidate.dec": 1,
+            "candidate.jd": 1,
+            "candidate.jdendhist": 1,
+            "candidate.magpsf": 1,
+            "candidate.sigmapsf": 1,
+        }
+
+        for k in projection_kwargs.keys():
+            projection[k] = projection_kwargs[k]
 
         queries = []
         for cone in cones:
@@ -364,31 +395,8 @@ class Kowalski:
                     },
                     "catalogs": {
                         catalog: {
-                            "filter": {
-                                "candidate.jd": {"$gt": jd_start, "$lt": jd_end},
-                                "candidate.drb": {"$gt": drb},
-                                "candidate.ndethist": {"$gt": min_detections},
-                                "candidate.jdstarthist": {
-                                    "$gt": jd_start,
-                                    "$lt": jd_end,
-                                },
-                                "candidate.programid":
-                                # needs to be in the list of program_ids
-                                {
-                                    "$in": program_ids
-                                },  # 1 = ZTF Public, 2 = ZTF Public+Partnership, 3 = ZTF Public+Partnership+Caltech
-                            },
-                            "projection": {
-                                "_id": 0,
-                                "candid": 1,
-                                "objectId": 1,
-                                "candidate.ra": 1,
-                                "candidate.dec": 1,
-                                "candidate.jd": 1,
-                                "candidate.jdendhist": 1,
-                                "candidate.magpsf": 1,
-                                "candidate.sigmapsf": 1,
-                            },
+                            "filter": filter,
+                            "projection": projection,
                         }
                         for catalog in catalogs
                     },
@@ -401,15 +409,21 @@ class Kowalski:
         candidates_per_catalogs = {catalog: [] for catalog in catalogs}
 
         for r in response:
-            assert "data" in r
-            data = r.get("data")
+            data = r.get("data", None)
+            if data is None:
+                continue
             for catalog in catalogs:
-                assert catalog in data
                 candidates_per_catalogs[catalog].extend(data[catalog]["object"])
 
-        candidates_per_catalogs = {
-            catalog: list({c["candid"]: c for c in candidates}.values())
-            for catalog, candidates in candidates_per_catalogs.items()
-        }
+        if not all(
+            [
+                len(candidates_per_catalogs[catalog]) > 0
+                for catalog in candidates_per_catalogs.keys()
+            ]
+        ):
+            candidates_per_catalogs = {
+                catalog: list({c["candid"]: c for c in candidates}.values())
+                for catalog, candidates in candidates_per_catalogs.items()
+            }  # remove duplicates
 
         return candidates_per_catalogs
