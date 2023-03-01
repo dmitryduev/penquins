@@ -15,7 +15,7 @@ from typing import List, Mapping, Optional, Sequence, Union
 
 import astropy.units as u
 import astropy_healpix as ah
-from astropy_healpix import healpy as hp
+import healpy as hp
 import requests
 from astropy.io import fits
 from astropy.time import Time
@@ -55,9 +55,9 @@ def get_cones(path, cumprob):
     cones = []
     for order, values in moc_json.items():
         for value in values:
-            ra, dec = hp.pix2ang(2 ** int(order), int(value), lonlat=True)
-            ang = hp.nside2resol(2 ** int(order), arcmin=True) * 60
-            cones.append([ra, dec, ang])
+            ra, dec = hp.pix2ang(2 ** int(order), int(value), lonlat=True, nest=True)
+            r = hp.max_pixrad(2 ** int(order), degrees=True)
+            cones.append([ra, dec, r])
     return cones
 
 
@@ -326,8 +326,9 @@ class Kowalski:
         start_date: str,
         end_date: str,
         min_detections: int,
+        drb: float,
         catalogs: List[str],
-        program_id: int,
+        program_ids: List[int],
         n_treads=6,
     ) -> List[dict]:
         missing_args = [
@@ -338,8 +339,9 @@ class Kowalski:
                 start_date,
                 end_date,
                 min_detections,
+                drb,
                 catalogs,
-                program_id,
+                program_ids,
             ]
             if arg is None
         ]
@@ -357,24 +359,23 @@ class Kowalski:
                 "query": {
                     "object_coordinates": {
                         "cone_search_radius": cone[2],
-                        "cone_search_unit": "arcsec",
+                        "cone_search_unit": "deg",
                         "radec": {"object": [cone[0], cone[1]]},
                     },
                     "catalogs": {
                         catalog: {
                             "filter": {
                                 "candidate.jd": {"$gt": jd_start, "$lt": jd_end},
-                                "candidate.drb": {"$gt": 0.8},
+                                "candidate.drb": {"$gt": drb},
                                 "candidate.ndethist": {"$gt": min_detections},
                                 "candidate.jdstarthist": {
                                     "$gt": jd_start,
                                     "$lt": jd_end,
                                 },
                                 "candidate.programid":
-                                # needs to be lower than or equal to program_id, but not 0 (0 is engineering data)
+                                # needs to be in the list of program_ids
                                 {
-                                    "$lte": program_id,
-                                    "$gt": 0,
+                                    "$in": program_ids
                                 },  # 1 = ZTF Public, 2 = ZTF Public+Partnership, 3 = ZTF Public+Partnership+Caltech
                             },
                             "projection": {

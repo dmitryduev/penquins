@@ -163,12 +163,13 @@ class TestPenquins:
         filename = "localization.fits"
         path = os.path.join(os.path.dirname(__file__), "data", filename)
 
-        cumprob = 0.1
+        cumprob = 0.5
         start_date = "2019-01-01"
         end_date = "2020-01-02"
         min_nb_detections = 5
+        drb = 0.8
         catalogs = ["ZTF_alerts"]
-        program_id = 1
+        program_ids = [1]
 
         candidates_in_skymap = self.kowalski.query_skymap(
             path,
@@ -176,8 +177,9 @@ class TestPenquins:
             start_date,
             end_date,
             min_nb_detections,
+            drb,
             catalogs,
-            program_id,
+            program_ids,
             n_treads,
         )
 
