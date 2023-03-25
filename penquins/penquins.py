@@ -79,17 +79,20 @@ class TimeoutHTTPAdapter(HTTPAdapter):
 
 
 class Kowalski:
-    """Class to communicate with a Kowalski instance"""
+    """Class to communicate with one or many Kowalski instance"""
+    multiple_instances = True
+    instances = {}
 
     def __init__(
         self,
         username: Optional[str] = None,
         password: Optional[str] = None,
         token: Optional[str] = None,
-        protocol: str = "https",
-        host: str = "kowalski.caltech.edu",
-        port: int = 443,
+        protocol: Optional[str] = "https",
+        host: Optional[str] = "kowalski.caltech.edu",
+        port: Optional[str] = 443,
         verbose: bool = False,
+        instances: dict = None,
         **kwargs,
     ):
         """
@@ -102,107 +105,187 @@ class Kowalski:
         verbose:
             "Status, Kowalski!"
         """
-
-        if (username is None) and (password is None) and (token is None):
-            raise ValueError(
-                "Missing credentials: provide either username and password or token"
-            )
-
-        if (username is not None) and (password is None):
-            netrc_auth = netrc().authenticators(host)
-            if netrc_auth:
-                username, _, password = netrc_auth
-
+        self.instances = {}
         # Status, Kowalski!
         self.v = verbose
 
-        self.protocol = protocol
+        if instances is None:
+            # if there is no instances dict, then create one with the "default" instance
+            instances = {"default": {
+                "username": username,
+                "password": password,
+                "token": token,
+                "protocol": protocol,
+                "host": host,
+                "port": port,
+            }}
+            self.multiple_instances = False
+            
+        #verify that there isnt any duplicate instance names, and display an error saying which ones
+        if len(instances) != len(set(instances.keys())):
+            raise ValueError(f"Duplicate instance names: {', '.join([name for name in instances.keys() if instances.keys().count(name) > 1])}")
 
-        self.host = host
-        self.port = port
+        for name, cfg in instances.items():
+            self.add(name, cfg, **kwargs)
 
-        self.base_url = f"{self.protocol}://{self.host}:{self.port}"
+    # we create the method to add an instance to the class
+    def add(self, name, cfg, **kwargs):
+        # verify that no instance with the same name already exists
+        if name in self.instances:
+            raise ValueError(f"Instance {name} already exists")
+        
+        # verify that no instance has the same host, port, and username + password or token
+        for instance_name, instance in self.instances.items():
+            if (
+                instance["host"] == cfg.get("host", "kowalski.caltech.edu")
+                and instance["port"] == cfg.get("port", 443)
+                and (
+                    (instance.get("username", None) == cfg.get("username", None) and instance.get("password", None) == cfg.get("password", None))
+                    or (instance["token"] == cfg.get("token", None))
+                )
+            ):
+                raise ValueError(f"Instance {name} seems to be a duplicate of {instance_name}")
+        
+        self.instances[name] = {}
+        try:
+            if (cfg.get("username", None) is None) and (cfg.get("password", None) is None) and (
+                    cfg.get("token", None) is None
+                ):
+                    raise ValueError(
+                        f"Missing credentials for {name}: provide either username and password, or token"
+                    )
+                
+            if (cfg.get("username", None) is not None) and (cfg.get("password", None) is None):
+                netrc_auth = netrc().authenticators(cfg.get("host", "kowalski.caltech.edu"))
+                if netrc_auth:
+                    cfg["username"], _, cfg["password"] = netrc_auth
 
-        self.session = requests.Session()
+            self.instances[name]["protocol"] = cfg.get("protocol", "https")
+            self.instances[name]["host"] = cfg.get("host", "kowalski.caltech.edu")
+            self.instances[name]["port"] = cfg.get("port", 443)
 
-        # Prevent Requests from attempting to do HTTP basic auth using a
-        # matching username and password from the user's ~/.netrc file,
-        # because kowalski will reject all HTTP basic auth attempts.
-        self.session.trust_env = False
+            self.instances[name]["base_url"] = f"{self.instances[name]['protocol']}://{self.instances[name]['host']}:{self.instances[name]['port']}"
 
-        # mount session adapters
-        timeout = kwargs.get("timeout", DEFAULT_TIMEOUT)
-        pool_connections = kwargs.get("pool_connections", DEFAULT_POOLSIZE)
-        pool_maxsize = kwargs.get("pool_maxsize", DEFAULT_POOLSIZE)
-        max_retries = kwargs.get("max_retries", DEFAULT_RETRIES)
-        backoff_factor = kwargs.get("backoff_factor", DEFAULT_BACKOFF_FACTOR)
-        pool_block = kwargs.get("pool_block", DEFAULT_POOLBLOCK)
+            # set up session
+            self.instances[name]["session"] = requests.Session()
+            # Prevent Requests from attempting to do HTTP basic auth using a
+            # matching username and password from the user's ~/.netrc file,
+            # because kowalski will reject all HTTP basic auth attempts.
+            self.instances[name]["session"].trust_env = False
+            self.instances[name]["methods"] = {
+                "get": self.instances[name]["session"].get,
+                "post": self.instances[name]["session"].post,
+                "put": self.instances[name]["session"].put,
+                "patch": self.instances[name]["session"].patch,
+                "delete": self.instances[name]["session"].delete,
+            }
+            # mount session adapters
+            timeout = kwargs.get("timeout", DEFAULT_TIMEOUT)
+            pool_connections = kwargs.get("pool_connections", DEFAULT_POOLSIZE)
+            pool_maxsize = kwargs.get("pool_maxsize", DEFAULT_POOLSIZE)
+            max_retries = kwargs.get("max_retries", DEFAULT_RETRIES)
+            backoff_factor = kwargs.get("backoff_factor", DEFAULT_BACKOFF_FACTOR)
+            pool_block = kwargs.get("pool_block", DEFAULT_POOLBLOCK)
 
-        retries = Retry(
-            total=max_retries,
-            backoff_factor=backoff_factor,
-            status_forcelist=[405, 429, 500, 502, 503, 504],
-            allowed_methods=["HEAD", "GET", "PUT", "POST", "PATCH"],
-        )
-        adapter = TimeoutHTTPAdapter(
-            timeout=timeout,
-            max_retries=retries,
-            pool_connections=pool_connections,
-            pool_maxsize=pool_maxsize,
-            pool_block=pool_block,
-        )
-        self.session.mount("https://", adapter)
-        self.session.mount("http://", adapter)
+            retries = Retry(
+                total=max_retries,
+                backoff_factor=backoff_factor,
+                status_forcelist=[405, 429, 500, 502, 503, 504],
+                allowed_methods=["HEAD", "GET", "PUT", "POST", "PATCH"],
+            )
+            adapter = TimeoutHTTPAdapter(
+                timeout=timeout,
+                max_retries=retries,
+                pool_connections=pool_connections,
+                pool_maxsize=pool_maxsize,
+                pool_block=pool_block,
+            )
+            self.instances[name]["session"].mount("https://", adapter)
+            self.instances[name]["session"].mount("http://", adapter)
 
-        # set up authentication headers
-        if token is None:
-            self.username = username
-            self.password = password
-            self.token = self.authenticate()
-        else:
-            self.token = token
+            # set up authentication headers
+            if (cfg.get("token", None) is None):
+                self.instances[name]["username"] = cfg.get("username", None)
+                self.instances[name]["password"] = cfg.get("password", None)
+                self.instances[name]["token"] = self.authenticate()
+            else:
+                self.instances[name]["token"] = cfg.get("token", None)
 
-        self.headers = {"Authorization": self.token}
+            self.instances[name]["headers"] = {"Authorization": self.instances[name]["token"]}
+            # if we now have more than one instance, set multiple_instances to True
+            if len(self.instances) > 1:
+                self.multiple_instances = True
+            
+            catalogs = self.get_catalogs(name)
+            self.instances[name]["catalogs"] = catalogs
 
-        self.methods = {
-            "get": self.session.get,
-            "post": self.session.post,
-            "put": self.session.put,
-            "patch": self.session.patch,
-            "delete": self.session.delete,
-        }
+        except Exception as e:
+            del self.instances[name]
+            if len(self.instances) == 1:
+                self.multiple_instances = False
+            raise ValueError(f"Failed to add instance {name}: {e}")
 
     def __enter__(self):
         return self
 
     def __exit__(self, *exc):
         # run shut down procedure
-        self.close()
+        self.close_all()
         return False
 
-    def close(self):
+    def close_all(self):
+        """Shutdown session(s) gracefully
+        :return:
+        """
+        instances_closed = {}
+        for name, instance in self.instances.items():
+            if self.v:
+                print(f"Shutting down {name}...")
+                try:
+                    instance["session"].close()
+                    instances_closed[name] = True
+                except Exception as e:
+                    if self.v:
+                        print(e)
+                    instances_closed[name] = False
+        return instances_closed
+    
+    def close(self, name=None):
         """Shutdown session gracefully
         :return:
         """
+        if name is None:
+            if not self.multiple_instances:
+                name = list(self.instances.keys())[0]
+            else:
+                raise ValueError("Please specify instance name when using multiple instances")
+        
+        if self.v:
+            print(f"Shutting down {name}...")
         try:
-            self.session.close()
+            self.instances[name]["session"].close()
             return True
         except Exception as e:
             if self.v:
                 print(e)
             return False
 
-    def authenticate(self):
+    def authenticate(self, name=None):
         """Authenticate user, return access token
         :return:
         """
-
+        if name is None:
+            if not self.multiple_instances:
+                name = list(self.instances.keys())[0]
+            else:
+                raise ValueError("Please specify instance name when using multiple instances")
+        
         # post username and password, get access token
-        auth = self.session.post(
-            f"{self.base_url}/api/auth",
+        auth = self.instances[name]["session"].post(
+            f"{self.instances[name]['base_url']}/api/auth",
             json={
-                "username": self.username,
-                "password": self.password,
+                "username": self.instances[name]["username"],
+                "password": self.instances[name]["password"],
                 "penquins.__version__": __version__,
             },
         )
@@ -213,19 +296,25 @@ class Kowalski:
 
             if "token" not in auth.json():
                 print("Authentication failed")
-                raise Exception(auth.json().get("message", "Authentication failed"))
+                raise Exception(auth.json().get("message", f"Authentication failed for {name}"))
 
             access_token = auth.json().get("token")
 
             if self.v:
-                print("Successfully authenticated")
+                print(f"Successfully authenticated to {name}")
 
             return access_token
 
-        raise Exception("Authentication failed")
+        raise Exception(f"Authentication failed for {name}: {str(auth.json())}")
 
-    def api(self, method: str, endpoint: str, data: Optional[Mapping] = None):
+    def api(self, method: str, endpoint: str, data: Optional[Mapping] = None, name=None):
         """Call API endpoint on Kowalski"""
+        if name is None:
+            if not self.multiple_instances:
+                name = list(self.instances.keys())[0]
+            else:
+                raise ValueError("Please specify instance name when using multiple instances")
+        
         method = method.lower()
         # allow using both "/<path>/<endpoint>" and "<path>/<endpoint>"
         endpoint = endpoint[1:] if endpoint.startswith("/") else endpoint
@@ -236,40 +325,62 @@ class Kowalski:
             raise ValueError(f"Unsupported method: {method}")
 
         if method != "get":
-            resp = self.methods[method](
-                os.path.join(self.base_url, endpoint),
+            resp = self.instances[name]["methods"][method](
+                os.path.join(self.instances[name]["base_url"], endpoint),
                 json=data,
-                headers=self.headers,
+                headers=self.instances[name]["headers"],
             )
         else:
-            resp = self.methods[method](
-                os.path.join(self.base_url, endpoint),
+            resp = self.instances[name]["methods"][method](
+                os.path.join(self.instances[name]["base_url"], endpoint),
                 params=data,
-                headers=self.headers,
+                headers=self.instances[name]["headers"],
             )
 
         return loads(resp.text)
 
-    def batch_query(self, queries: Sequence[Mapping], n_treads: int = 4):
+    def batch_query(self, queries: Sequence[Mapping], n_treads: int = 4, name=None):
         """Call Kowalski's /api/queries endpoint using multiple processes
 
         :param queries: sequence of queries
         :param n_treads: number of processes to use
         :return:
         """
+        if name is None:
+            if not self.multiple_instances:
+                name = list(self.instances.keys())[0]
+            else:
+                raise ValueError("Batch query: Please specify instance name when using multiple instances. You can't batch query across instances (yet...)")
+            
         n_treads = min(len(queries), n_treads)
 
         with ThreadPool(processes=n_treads) as pool:
             if self.v:
-                return list(tqdm(pool.imap(self.query, queries), total=len(queries)))
-            return list(pool.imap(self.query, queries))
+                return tqdm(pool.starmap(self.query, [(query, name) for query in queries], chunksize=len(queries)))
+            return pool.starmap(self.query, [(query, name) for query in queries], chunksize=len(queries))
 
-    def query(self, query: Mapping):
+    def query(self, query: Mapping, name=None):
         """Call Kowalski's /api/queries endpoint using multiple processes
 
         :param query: query mapping
         :return:
         """
+        if name is None:
+            if not self.multiple_instances:
+                name = list(self.instances.keys())[0]
+            else:
+                catalog_name = query["query"].get("catalog", None)
+                if catalog_name is not None:
+                    # find which instance has this catalog
+                    for name, instance in self.instances.items():
+                        if catalog_name in instance["catalogs"]:
+                            print(f"No instance name specified, using: {name} which has catalog: {catalog_name}")
+                            break
+                    if name is None:
+                        raise ValueError(f"No instance has catalog: {catalog_name}")
+                else:
+                    raise ValueError("Please specify instance name when using multiple instances and no catalog is specified in the query")
+        
         _query = deepcopy(query)
 
         # by default, all queries are not registered in the db and the task/results are stored on disk as json files
@@ -288,23 +399,28 @@ class Kowalski:
 
                 _query["kwargs"]["_id"] = _id
 
-        resp = self.session.post(
-            os.path.join(self.base_url, "api/queries"),
+        resp = self.instances[name]["session"].post(
+            os.path.join(self.instances[name]["base_url"], "api/queries"),
             json=_query,
-            headers=self.headers,
+            headers=self.instances[name]["headers"],
         )
-
+        print(f"Querying {name}...done")
         return loads(resp.text)
 
-    def ping(self) -> bool:
+    def ping(self, name=None) -> bool:
         """Ping Kowalski
 
         :return: True if connection is ok, False otherwise
         """
+        if name is None:
+            if not self.multiple_instances:
+                name = list(self.instances.keys())[0]
+            else:
+                raise ValueError("Please specify instance name when using multiple instances")
         try:
-            resp = self.session.get(
-                os.path.join(self.base_url, ""),
-                headers=self.headers,
+            resp = self.instances[name]["session"].get(
+                os.path.join(self.instances[name]["base_url"], ""),
+                headers=self.instances[name]["headers"],
             )
 
             if resp.status_code == requests.codes.ok:
@@ -329,6 +445,7 @@ class Kowalski:
         filter_kwargs: Optional[Mapping] = dict(),
         projection_kwargs: Optional[Mapping] = dict(),
         n_treads: int = 4,
+        name=None,
     ) -> List[dict]:
         missing_args = [
             arg
@@ -344,6 +461,12 @@ class Kowalski:
         ]
         if len(missing_args) > 0:
             raise ValueError(f"Missing arguments: {missing_args}")
+        
+        if name is None:
+            if not self.multiple_instances:
+                name = list(self.instances.keys())[0]
+            else:
+                raise ValueError("Please specify instance name when using multiple instances")
 
         cones = get_cones(path, cumprob)
 
@@ -408,7 +531,7 @@ class Kowalski:
 
             queries.append(query)
 
-        response = self.batch_query(queries=queries, n_treads=n_treads)
+        response = self.batch_query(queries=queries, n_treads=n_treads, name=name)
         candidates_per_catalogs = {catalog: [] for catalog in catalogs}
 
         for r in response:
@@ -430,3 +553,26 @@ class Kowalski:
             }  # remove duplicates
 
         return candidates_per_catalogs
+
+    def get_catalogs(self, name=None) -> dict:
+        if name is None:
+            if not self.multiple_instances:
+                name = list(self.instances.keys())[0]
+            else:
+                raise ValueError("Please specify instance name when using multiple instances")
+        
+        query = {
+            "query_type": "info",
+            "query": {
+                "command": "catalog_names",
+            },
+        }
+        response = self.query(query=query, name=name)
+        return response.get("data")
+    
+    def get_catalogs_all(self) -> dict:
+        catalogs = {}
+        for name in self.instances.keys():
+            catalogs[name] = self.get_catalogs(name=name)
+        return catalogs
+    

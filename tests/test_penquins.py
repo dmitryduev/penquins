@@ -26,6 +26,7 @@ def kowalski_fixture(request):
         port=port,
         verbose=True,
     )
+    print("done with the fixture setup")
 
 
 @pytest.fixture(autouse=True, scope="class")
@@ -66,10 +67,13 @@ class TestPenquins:
     """
 
     def test_token_authorization(self):
-        token = self.kowalski.token
+        print("gonna grab a token from the default instance")
+        print(self.kowalski.instances)
+        token = self.kowalski.instances["default"]["token"]
 
+        print("now creating a new instance of the class")
         k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
-
+        print("will ping")
         assert k.ping()
 
     def test_query_cone_search(self):
@@ -206,3 +210,101 @@ class TestPenquins:
                     for candidate in candidates_in_skymap[catalog]
                 ]
             )
+
+    def test_cant_add_duplicate_instance(self):
+        token = self.kowalski.instances["default"]["token"]
+
+        k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
+        cfg = {
+            "token": token,
+            "protocol": "https",
+            "host": "localhost",
+            "port": 4000,
+        }
+        with pytest.raises(ValueError):
+            k.add(name="test", cfg=cfg)
+
+    def test_cant_add_instance_with_same_name(self):
+        token = self.kowalski.instances["default"]["token"]
+
+        k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
+        cfg = {
+            "token": token,
+            "protocol": "https",
+            "host": "localhost",
+            "port": 4000,
+        }
+        with pytest.raises(ValueError):
+            k.add(name="default", cfg=cfg)
+
+    def test_add_instance(self):
+        token = self.kowalski.instances["default"]["token"]
+
+        k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
+        cfg = {
+            "token": token,
+            "protocol": "http",
+            "host": "127.0.0.1", # this is the trick we use to test the add() method running only one kowalski instance
+            "port": 4000,
+        }
+        k.add(name="test", cfg=cfg)
+
+    def test_query_when_multiple_instances_with_name(self):
+        token = self.kowalski.instances["default"]["token"]
+
+        k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
+        cfg = {
+            "token": token,
+            "protocol": "http", # here we change the protocol
+            "host": "127.0.0.1", # this is the trick we use to test the add() method running only one kowalski instance
+            "port": 4000,
+        }
+        k.add(name="test", cfg=cfg)
+
+        catalog = "ZTF_alerts"
+
+        obj_id = "ZTF17aaaaaas"
+
+        query = {
+            "query_type": "find",
+            "query": {
+                "catalog": catalog,
+                "filter": {"objectId": obj_id},
+                "projection": {"_id": 0, "objectId": 1},
+            },
+        }
+
+        response = k.query(query=query, name="test")
+        assert "data" in response
+        data = response.get("data")
+        assert len(data) > 0
+        assert data[0]["objectId"] == obj_id
+
+    def test_get_catalogs(self):
+        catalogs = self.kowalski.get_catalogs()
+        assert len(catalogs) > 0
+        assert "ZTF_alerts" in catalogs
+
+    def test_get_catalogs_when_multiple_instances(self):
+        token = self.kowalski.instances["default"]["token"]
+
+        k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
+        cfg = {
+            "token": token,
+            "protocol": "http", # here we change the protocol
+            "host": "127.0.0.1", # this is the trick we use to test the add() method running only one kowalski instance
+            "port": 4000,
+        }
+        k.add(name="test", cfg=cfg)
+
+        # get catalogs for one instance
+        catalogs = k.get_catalogs(name="test")
+
+        assert len(catalogs) > 0
+        assert "ZTF_alerts" in catalogs
+
+        # get catalogs for all instances
+        catalogs = k.get_catalogs_all()
+        assert set(catalogs.keys()) == set(["default", "test"])
+        assert all([len(catalogs[name]) > 0 for name in catalogs.keys()])
+
