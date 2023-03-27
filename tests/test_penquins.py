@@ -26,7 +26,6 @@ def kowalski_fixture(request):
         port=port,
         verbose=True,
     )
-    print("done with the fixture setup")
 
 
 @pytest.fixture(autouse=True, scope="class")
@@ -67,13 +66,8 @@ class TestPenquins:
     """
 
     def test_token_authorization(self):
-        print("gonna grab a token from the default instance")
-        print(self.kowalski.instances)
         token = self.kowalski.instances["default"]["token"]
-
-        print("now creating a new instance of the class")
         k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
-        print("will ping")
         assert k.ping()
 
     def test_query_cone_search(self):
@@ -101,11 +95,56 @@ class TestPenquins:
         }
 
         response = self.kowalski.query(query=query)
-        assert "data" in response
-        data = response.get("data")
+
+        # the response should be like:
+        # {'default': {'status': 'success', 'message': 'Successfully executed query', 'data': {'ZTF_alerts': {'ZTF17aaaaaas': [{'objectId': 'ZTF17aaaaaas'}]}}}}
+
+        assert "default" in response
+        data = response["default"].get("data")
         assert catalog in data
         assert obj_id in data[catalog]
         assert len(data[catalog][obj_id]) > 0
+
+    def test_query_cone_search_multiple_catalogs(self):
+        catalog_1 = "ZTF_alerts"
+        catalog_2 = "PGIR_alerts"
+        obj_id = "ZTF17aaaaaas"
+
+        query = {
+            "query_type": "cone_search",
+            "query": {
+                "object_coordinates": {
+                    "cone_search_radius": 2,
+                    "cone_search_unit": "arcsec",
+                    "radec": {
+                        obj_id: [
+                            68.578209,
+                            49.0871395,
+                        ]
+                    },
+                },
+                "catalogs": {
+                    catalog_1: {"filter": {}, "projection": {"_id": 0, "objectId": 1}},
+                    catalog_2: {"filter": {}, "projection": {"_id": 0, "objectId": 1}},
+                },
+            },
+            "kwargs": {"filter_first": False},
+        }
+
+        response = self.kowalski.query(query=query)
+
+        # the response should be like:
+        # {'default': {'status': 'success', 'message': 'Successfully executed query', 'data': {'ZTF_alerts': {'ZTF17aaaaaas': [{'objectId': 'ZTF17aaaaaas'}]},
+        # 'PGIR_alerts': {'ZTF17aaaaaas': []}}}}
+
+        assert "default" in response
+        data = response["default"].get("data")
+        assert catalog_1 in data
+        assert catalog_2 in data
+        assert obj_id in data[catalog_1]
+        assert obj_id in data[catalog_2]
+        assert len(data[catalog_1][obj_id]) > 0
+        assert len(data[catalog_2][obj_id]) == 0
 
     def test_query_find(self):
         catalog = "ZTF_alerts"
@@ -121,8 +160,8 @@ class TestPenquins:
         }
 
         response = self.kowalski.query(query=query)
-        assert "data" in response
-        data = response.get("data")
+        assert "default" in response
+        data = response["default"].get("data")
         assert len(data) > 0
         assert data[0]["objectId"] == obj_id
 
@@ -169,7 +208,7 @@ class TestPenquins:
         assert response["message"] == f"Removed filter id {filter_id}"
 
     def test_query_cone_search_from_skymap(self):
-        n_treads = 8
+        max_n_threads = 8
         filename = "localization.fits"
         path = os.path.join(os.path.dirname(__file__), "data", filename)
 
@@ -188,7 +227,7 @@ class TestPenquins:
             "candidate.isdiffpos": 1,
         }
 
-        candidates_in_skymap = self.kowalski.query_skymap(
+        candidates_in_skymap_per_instance = self.kowalski.query_skymap(
             path,
             cumprob,
             jd_start,
@@ -197,17 +236,22 @@ class TestPenquins:
             program_ids,
             filter_kwargs,
             projection_kwargs,
-            n_treads=n_treads,
+            max_n_threads=max_n_threads,
         )
 
-        assert len(candidates_in_skymap.keys()) > 0
+        assert len(candidates_in_skymap_per_instance.keys()) > 0
+        assert (
+            self.kowalski.instances.keys() == candidates_in_skymap_per_instance.keys()
+        )
         for catalog in catalogs:
-            assert catalog in candidates_in_skymap.keys()
-            assert len(candidates_in_skymap[catalog]) > 0
+            assert catalog in candidates_in_skymap_per_instance["default"].keys()
+            assert len(candidates_in_skymap_per_instance["default"][catalog]) > 0
             assert all(
                 [
                     "isdiffpos" in candidate["candidate"].keys()
-                    for candidate in candidates_in_skymap[catalog]
+                    for candidate in candidates_in_skymap_per_instance["default"][
+                        catalog
+                    ]
                 ]
             )
 
@@ -244,7 +288,7 @@ class TestPenquins:
         cfg = {
             "token": token,
             "protocol": "http",
-            "host": "127.0.0.1", # this is the trick we use to test the add() method running only one kowalski instance
+            "host": "127.0.0.1",  # this is the trick we use to test the add() method running only one kowalski instance
             "port": 4000,
         }
         k.add(name="test", cfg=cfg)
@@ -255,8 +299,8 @@ class TestPenquins:
         k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
         cfg = {
             "token": token,
-            "protocol": "http", # here we change the protocol
-            "host": "127.0.0.1", # this is the trick we use to test the add() method running only one kowalski instance
+            "protocol": "http",  # here we change the protocol
+            "host": "127.0.0.1",  # this is the trick we use to test the add() method running only one kowalski instance
             "port": 4000,
         }
         k.add(name="test", cfg=cfg)
@@ -275,8 +319,8 @@ class TestPenquins:
         }
 
         response = k.query(query=query, name="test")
-        assert "data" in response
-        data = response.get("data")
+        assert "test" in response
+        data = response["test"].get("data")
         assert len(data) > 0
         assert data[0]["objectId"] == obj_id
 
@@ -291,8 +335,8 @@ class TestPenquins:
         k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
         cfg = {
             "token": token,
-            "protocol": "http", # here we change the protocol
-            "host": "127.0.0.1", # this is the trick we use to test the add() method running only one kowalski instance
+            "protocol": "http",  # here we change the protocol
+            "host": "127.0.0.1",  # this is the trick we use to test the add() method running only one kowalski instance
             "port": 4000,
         }
         k.add(name="test", cfg=cfg)
@@ -307,4 +351,3 @@ class TestPenquins:
         catalogs = k.get_catalogs_all()
         assert set(catalogs.keys()) == set(["default", "test"])
         assert all([len(catalogs[name]) > 0 for name in catalogs.keys()])
-

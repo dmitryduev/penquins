@@ -2,7 +2,6 @@
 
 __all__ = ["Kowalski", "__version__"]
 
-
 import os
 import secrets
 import string
@@ -80,8 +79,10 @@ class TimeoutHTTPAdapter(HTTPAdapter):
 
 class Kowalski:
     """Class to communicate with one or many Kowalski instance"""
+
     multiple_instances = True
     instances = {}
+    instances_per_catalog = {}
 
     def __init__(
         self,
@@ -111,19 +112,23 @@ class Kowalski:
 
         if instances is None:
             # if there is no instances dict, then create one with the "default" instance
-            instances = {"default": {
-                "username": username,
-                "password": password,
-                "token": token,
-                "protocol": protocol,
-                "host": host,
-                "port": port,
-            }}
+            instances = {
+                "default": {
+                    "username": username,
+                    "password": password,
+                    "token": token,
+                    "protocol": protocol,
+                    "host": host,
+                    "port": port,
+                }
+            }
             self.multiple_instances = False
-            
-        #verify that there isnt any duplicate instance names, and display an error saying which ones
+
+        # verify that there isnt any duplicate instance names, and display an error saying which ones
         if len(instances) != len(set(instances.keys())):
-            raise ValueError(f"Duplicate instance names: {', '.join([name for name in instances.keys() if instances.keys().count(name) > 1])}")
+            raise ValueError(
+                f"Duplicate instance names: {', '.join([name for name in instances.keys() if instances.keys().count(name) > 1])}"
+            )
 
         for name, cfg in instances.items():
             self.add(name, cfg, **kwargs)
@@ -133,30 +138,41 @@ class Kowalski:
         # verify that no instance with the same name already exists
         if name in self.instances:
             raise ValueError(f"Instance {name} already exists")
-        
+
         # verify that no instance has the same host, port, and username + password or token
         for instance_name, instance in self.instances.items():
             if (
                 instance["host"] == cfg.get("host", "kowalski.caltech.edu")
                 and instance["port"] == cfg.get("port", 443)
                 and (
-                    (instance.get("username", None) == cfg.get("username", None) and instance.get("password", None) == cfg.get("password", None))
+                    (
+                        instance.get("username", None) == cfg.get("username", None)
+                        and instance.get("password", None) == cfg.get("password", None)
+                    )
                     or (instance["token"] == cfg.get("token", None))
                 )
             ):
-                raise ValueError(f"Instance {name} seems to be a duplicate of {instance_name}")
-        
+                raise ValueError(
+                    f"Instance {name} seems to be a duplicate of {instance_name}"
+                )
+
         self.instances[name] = {}
         try:
-            if (cfg.get("username", None) is None) and (cfg.get("password", None) is None) and (
-                    cfg.get("token", None) is None
-                ):
-                    raise ValueError(
-                        f"Missing credentials for {name}: provide either username and password, or token"
-                    )
-                
-            if (cfg.get("username", None) is not None) and (cfg.get("password", None) is None):
-                netrc_auth = netrc().authenticators(cfg.get("host", "kowalski.caltech.edu"))
+            if (
+                (cfg.get("username", None) is None)
+                and (cfg.get("password", None) is None)
+                and (cfg.get("token", None) is None)
+            ):
+                raise ValueError(
+                    f"Missing credentials for {name}: provide either username and password, or token"
+                )
+
+            if (cfg.get("username", None) is not None) and (
+                cfg.get("password", None) is None
+            ):
+                netrc_auth = netrc().authenticators(
+                    cfg.get("host", "kowalski.caltech.edu")
+                )
                 if netrc_auth:
                     cfg["username"], _, cfg["password"] = netrc_auth
 
@@ -164,7 +180,9 @@ class Kowalski:
             self.instances[name]["host"] = cfg.get("host", "kowalski.caltech.edu")
             self.instances[name]["port"] = cfg.get("port", 443)
 
-            self.instances[name]["base_url"] = f"{self.instances[name]['protocol']}://{self.instances[name]['host']}:{self.instances[name]['port']}"
+            self.instances[name][
+                "base_url"
+            ] = f"{self.instances[name]['protocol']}://{self.instances[name]['host']}:{self.instances[name]['port']}"
 
             # set up session
             self.instances[name]["session"] = requests.Session()
@@ -204,20 +222,27 @@ class Kowalski:
             self.instances[name]["session"].mount("http://", adapter)
 
             # set up authentication headers
-            if (cfg.get("token", None) is None):
+            if cfg.get("token", None) is None:
                 self.instances[name]["username"] = cfg.get("username", None)
                 self.instances[name]["password"] = cfg.get("password", None)
                 self.instances[name]["token"] = self.authenticate()
             else:
                 self.instances[name]["token"] = cfg.get("token", None)
 
-            self.instances[name]["headers"] = {"Authorization": self.instances[name]["token"]}
+            self.instances[name]["headers"] = {
+                "Authorization": self.instances[name]["token"]
+            }
             # if we now have more than one instance, set multiple_instances to True
             if len(self.instances) > 1:
                 self.multiple_instances = True
-            
+
             catalogs = self.get_catalogs(name)
             self.instances[name]["catalogs"] = catalogs
+            self.instances_per_catalog = {
+                catalog: name
+                for name, instance in self.instances.items()
+                for catalog in instance["catalogs"]
+            }
 
         except Exception as e:
             del self.instances[name]
@@ -249,7 +274,7 @@ class Kowalski:
                         print(e)
                     instances_closed[name] = False
         return instances_closed
-    
+
     def close(self, name=None):
         """Shutdown session gracefully
         :return:
@@ -258,8 +283,10 @@ class Kowalski:
             if not self.multiple_instances:
                 name = list(self.instances.keys())[0]
             else:
-                raise ValueError("Please specify instance name when using multiple instances")
-        
+                raise ValueError(
+                    "Please specify instance name when using multiple instances"
+                )
+
         if self.v:
             print(f"Shutting down {name}...")
         try:
@@ -278,8 +305,10 @@ class Kowalski:
             if not self.multiple_instances:
                 name = list(self.instances.keys())[0]
             else:
-                raise ValueError("Please specify instance name when using multiple instances")
-        
+                raise ValueError(
+                    "Please specify instance name when using multiple instances"
+                )
+
         # post username and password, get access token
         auth = self.instances[name]["session"].post(
             f"{self.instances[name]['base_url']}/api/auth",
@@ -296,7 +325,9 @@ class Kowalski:
 
             if "token" not in auth.json():
                 print("Authentication failed")
-                raise Exception(auth.json().get("message", f"Authentication failed for {name}"))
+                raise Exception(
+                    auth.json().get("message", f"Authentication failed for {name}")
+                )
 
             access_token = auth.json().get("token")
 
@@ -307,14 +338,18 @@ class Kowalski:
 
         raise Exception(f"Authentication failed for {name}: {str(auth.json())}")
 
-    def api(self, method: str, endpoint: str, data: Optional[Mapping] = None, name=None):
+    def api(
+        self, method: str, endpoint: str, data: Optional[Mapping] = None, name=None
+    ):
         """Call API endpoint on Kowalski"""
         if name is None:
             if not self.multiple_instances:
                 name = list(self.instances.keys())[0]
             else:
-                raise ValueError("Please specify instance name when using multiple instances")
-        
+                raise ValueError(
+                    "Please specify instance name when using multiple instances"
+                )
+
         method = method.lower()
         # allow using both "/<path>/<endpoint>" and "<path>/<endpoint>"
         endpoint = endpoint[1:] if endpoint.startswith("/") else endpoint
@@ -339,48 +374,40 @@ class Kowalski:
 
         return loads(resp.text)
 
-    def batch_query(self, queries: Sequence[Mapping], n_treads: int = 4, name=None):
+    def batch_query(self, queries: Sequence[Mapping], n_threads: int = 4):
         """Call Kowalski's /api/queries endpoint using multiple processes
 
         :param queries: sequence of queries
-        :param n_treads: number of processes to use
+        :param n_threads: number of processes to use
         :return:
         """
-        if name is None:
-            if not self.multiple_instances:
-                name = list(self.instances.keys())[0]
-            else:
-                raise ValueError("Batch query: Please specify instance name when using multiple instances. You can't batch query across instances (yet...)")
-            
-        n_treads = min(len(queries), n_treads)
+        # the queries are a dict with the key being the instance name, and the value being a query
+        # we want to reformat it to a list of tuples, where the first element is the query, and the second is the instance name
+        # we also want to make sure that the queries are unique
+        queries_name_tpl = []
+        for name, queries in queries.items():
+            for query in queries:
+                queries_name_tpl.append((query, name))
 
-        with ThreadPool(processes=n_treads) as pool:
+        n_threads = min(len(queries), n_threads)
+
+        with ThreadPool(processes=n_threads) as pool:
             if self.v:
-                return tqdm(pool.starmap(self.query, [(query, name) for query in queries], chunksize=len(queries)))
-            return pool.starmap(self.query, [(query, name) for query in queries], chunksize=len(queries))
+                return tqdm(
+                    pool.starmap(
+                        self.single_query, queries_name_tpl, chunksize=len(queries)
+                    )
+                )
+            return pool.starmap(
+                self.single_query, queries_name_tpl, chunksize=len(queries)
+            )
 
-    def query(self, query: Mapping, name=None):
+    def single_query(self, query: Mapping, name=None):
         """Call Kowalski's /api/queries endpoint using multiple processes
 
         :param query: query mapping
         :return:
         """
-        if name is None:
-            if not self.multiple_instances:
-                name = list(self.instances.keys())[0]
-            else:
-                catalog_name = query["query"].get("catalog", None)
-                if catalog_name is not None:
-                    # find which instance has this catalog
-                    for name, instance in self.instances.items():
-                        if catalog_name in instance["catalogs"]:
-                            print(f"No instance name specified, using: {name} which has catalog: {catalog_name}")
-                            break
-                    if name is None:
-                        raise ValueError(f"No instance has catalog: {catalog_name}")
-                else:
-                    raise ValueError("Please specify instance name when using multiple instances and no catalog is specified in the query")
-        
         _query = deepcopy(query)
 
         # by default, all queries are not registered in the db and the task/results are stored on disk as json files
@@ -404,8 +431,60 @@ class Kowalski:
             json=_query,
             headers=self.instances[name]["headers"],
         )
-        print(f"Querying {name}...done")
-        return loads(resp.text)
+        return {name: loads(resp.text)}
+
+    def query(
+        self,
+        query=None,
+        queries: list = None,
+        name=None,
+        use_batch_query: bool = False,
+        max_n_threads: int = 4,
+    ):
+        """Call Kowalski's /api/queries endpoint using multiple processes
+
+        :param query: query mapping
+        :return:
+        """
+        if query is None and queries is None:
+            raise ValueError("Please specify query or queries")
+        if query is not None and queries is not None:
+            raise ValueError("Please specify either query or queries, not both")
+        if query is not None:
+            query_split_in_queries = self.prepare_query(query, name=name)
+
+            if name is not None:
+                return self.single_query(query_split_in_queries[name], name=name)
+
+            if len(query_split_in_queries) == 1:
+                return self.single_query(
+                    query_split_in_queries[list(query_split_in_queries.keys())[0]],
+                    list(query_split_in_queries.keys())[0],
+                )
+
+            if use_batch_query:
+                # the n_threads parameter is the number of instances, maxed at max_n_threads
+                return self.batch_query(
+                    query_split_in_queries, n_threads=min(len(queries), max_n_threads)
+                )
+            else:
+                results = {}
+                for name, query in queries.items():
+                    results.update(self.single_query(query, name=name))
+                return results
+
+        if queries is not None:
+            queries_split_in_queries = self.prepare_queries(queries)
+            if use_batch_query:
+                # the n_threads parameter is the number of instances, maxed at max_n_threads
+                return self.batch_query(
+                    queries_split_in_queries, n_threads=min(len(queries), max_n_threads)
+                )
+            else:
+                results = {}
+                for name, query in queries.items():
+                    results.update(self.single_query(query, name=name))
+                return results
 
     def ping(self, name=None) -> bool:
         """Ping Kowalski
@@ -416,7 +495,9 @@ class Kowalski:
             if not self.multiple_instances:
                 name = list(self.instances.keys())[0]
             else:
-                raise ValueError("Please specify instance name when using multiple instances")
+                raise ValueError(
+                    "Please specify instance name when using multiple instances"
+                )
         try:
             resp = self.instances[name]["session"].get(
                 os.path.join(self.instances[name]["base_url"], ""),
@@ -444,8 +525,7 @@ class Kowalski:
         program_ids: List[int],
         filter_kwargs: Optional[Mapping] = dict(),
         projection_kwargs: Optional[Mapping] = dict(),
-        n_treads: int = 4,
-        name=None,
+        max_n_threads: int = 4,
     ) -> List[dict]:
         missing_args = [
             arg
@@ -461,12 +541,6 @@ class Kowalski:
         ]
         if len(missing_args) > 0:
             raise ValueError(f"Missing arguments: {missing_args}")
-        
-        if name is None:
-            if not self.multiple_instances:
-                name = list(self.instances.keys())[0]
-            else:
-                raise ValueError("Please specify instance name when using multiple instances")
 
         cones = get_cones(path, cumprob)
 
@@ -531,48 +605,153 @@ class Kowalski:
 
             queries.append(query)
 
-        response = self.batch_query(queries=queries, n_treads=n_treads, name=name)
-        candidates_per_catalogs = {catalog: [] for catalog in catalogs}
+        responses = self.query(
+            queries=queries, use_batch_query=True, max_n_threads=max_n_threads
+        )
 
-        for r in response:
-            data = r.get("data", None)
-            if data is None:
-                continue
-            for catalog in catalogs:
-                candidates_per_catalogs[catalog].extend(data[catalog]["object"])
+        candidates_per_catalogs_per_instance = {
+            name: {catalog: [] for catalog in self.instances[name]["catalogs"]}
+            for name in list(self.instances.keys())
+        }
 
-        if not all(
-            [
-                len(candidates_per_catalogs[catalog]) > 0
-                for catalog in candidates_per_catalogs.keys()
-            ]
-        ):
-            candidates_per_catalogs = {
-                catalog: list({c["candid"]: c for c in candidates}.values())
-                for catalog, candidates in candidates_per_catalogs.items()
-            }  # remove duplicates
+        for r in responses:
+            # first we have on response per query. Each response contains a dict with one key per instance
+            for name in list(r.keys()):
+                data = r[name].get("data", None)
+                if data is None:
+                    continue
+                for catalog in catalogs:
+                    candidates_per_catalogs_per_instance[name][catalog].extend(
+                        data[catalog]["object"]
+                    )
 
-        return candidates_per_catalogs
+        for name in candidates_per_catalogs_per_instance.keys():  # remove duplicates
+            for catalog in candidates_per_catalogs_per_instance[name].keys():
+                candidates_per_catalogs_per_instance[name][catalog] = list(
+                    {
+                        c["candid"]: c
+                        for c in candidates_per_catalogs_per_instance[name][catalog]
+                    }.values()
+                )
+
+        return candidates_per_catalogs_per_instance
 
     def get_catalogs(self, name=None) -> dict:
         if name is None:
             if not self.multiple_instances:
                 name = list(self.instances.keys())[0]
             else:
-                raise ValueError("Please specify instance name when using multiple instances")
-        
+                raise ValueError(
+                    "Please specify instance name when using multiple instances"
+                )
+
         query = {
             "query_type": "info",
             "query": {
                 "command": "catalog_names",
             },
         }
-        response = self.query(query=query, name=name)
-        return response.get("data")
-    
+        response = self.single_query(query=query, name=name)
+        return response[name].get("data")
+
     def get_catalogs_all(self) -> dict:
         catalogs = {}
         for name in self.instances.keys():
             catalogs[name] = self.get_catalogs(name=name)
         return catalogs
-    
+
+    def instance_has_catalog(self, catalog: str, name=None) -> bool:
+        if name is None:
+            if not self.multiple_instances:
+                name = list(self.instances.keys())[0]
+            else:
+                raise ValueError(
+                    "Please specify instance name when using multiple instances"
+                )
+        return catalog in self.instances[name]["catalogs"]
+
+    def prepare_query(self, query, name=None) -> dict:
+        """Based on the catalogs or catalog specified in the query, split the query into multiple queries for each instance"""
+        # we will return a dict of instances and their queries
+        if "catalogs" not in query["query"] and "catalog" not in query["query"]:
+            if name is None:
+                raise ValueError(
+                    "For catalog-less queries, please specify instance name"
+                )
+            else:
+                return {name: query}
+        # now we check if the query is for a single catalog or multiple catalogs
+        if "catalogs" in query["query"]:
+            catalogs = query["query"]["catalogs"]
+        else:
+            catalogs = [query["query"]["catalog"]]
+
+        queries = {name: None for name in self.instances.keys()}
+        if name is None:
+            # if no name is specified, but we have only one instance, we use that instance
+            if not self.multiple_instances:
+                name = list(self.instances.keys())[0]
+                if not all(
+                    [
+                        self.instance_has_catalog(catalog, name=name)
+                        for catalog in catalogs
+                    ]
+                ):
+                    raise ValueError(
+                        "One or more catalogs specified in the query are not available in the instance"
+                    )
+                queries[name] = query
+            # if no name is specified and we have multiple instances, we split the query into multiple queries by instance based on the catalogs
+            else:
+                for catalog in catalogs:
+                    instances_having_catalog = {
+                        instance_name: self.instance_has_catalog(
+                            catalog, name=instance_name
+                        )
+                        for instance_name in self.instances.keys()
+                    }
+                    if not any(instances_having_catalog.values()):
+                        raise ValueError(
+                            f"Catalog {catalog} is not available in any instance"
+                        )
+
+                    # we take the first instance that has the catalog
+                    instance_name = list(instances_having_catalog.keys())[
+                        list(instances_having_catalog.values()).index(True)
+                    ]
+                    if queries[instance_name] is None:
+                        # we set it to a copy of the original query, but with only the current catalog
+                        queries[instance_name] = deepcopy(query)
+                        # if it has a single "catalog" key, we remove it as we will replace it with a "catalogs" key
+                        if "catalog" in queries[instance_name]["query"]:
+                            del queries[instance_name]["query"]["catalog"]
+                        queries[instance_name]["query"]["catalogs"] = {
+                            catalog: query["query"]["catalogs"][catalog]
+                        }
+                    else:
+                        # if the instance already has a query, we add the current catalog to the list of catalogs
+                        queries[instance_name]["query"]["catalogs"][catalog] = query[
+                            "query"
+                        ]["catalogs"][catalog]
+        else:
+            # if a name is specified, we check if the instance has all the catalogs
+            if not all(
+                [self.instance_has_catalog(catalog, name=name) for catalog in catalogs]
+            ):
+                raise ValueError(
+                    "One or more catalogs specified in the query are not available in the specified instance"
+                )
+            queries[name] = query
+
+        return queries
+
+    def prepare_queries(self, queries, name=None) -> dict:
+        """Based on the catalogs or catalog specified in the queries, split the queries into multiple queries for each instance"""
+        # we will return a dict of instances and their queries
+        queries_per_instance = {name: [] for name in self.instances.keys()}
+        for query in queries:
+            query_per_instance = self.prepare_query(query, name=name)
+            for instance_name, query in query_per_instance.items():
+                queries_per_instance[instance_name].append(query)
+
+        return queries_per_instance
