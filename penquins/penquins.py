@@ -727,7 +727,7 @@ class Kowalski:
                             del queries[instance_name]["query"]["catalog"]
                             del queries[instance_name]["query"]["projection"]
                         queries[instance_name]["query"]["catalogs"] = {
-                            catalog: query["query"]["catalogs"][catalog]
+                            catalog: catalogs[catalog]
                         }
                     else:
                         # if the instance already has a query, we add the current catalog to the list of catalogs
