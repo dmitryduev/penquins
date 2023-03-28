@@ -684,7 +684,7 @@ class Kowalski:
         if "catalogs" in query["query"]:
             catalogs = query["query"]["catalogs"]
         else:
-            catalogs = [query["query"]["catalog"]]
+            catalogs = {query["query"]["catalog"]: query["query"]["projection"]}
 
         queries = {name: None for name in self.instances.keys()}
         if name is None:
@@ -694,7 +694,7 @@ class Kowalski:
                 if not all(
                     [
                         self.instance_has_catalog(catalog, name=name)
-                        for catalog in catalogs
+                        for catalog in catalogs.keys()
                     ]
                 ):
                     raise ValueError(
@@ -725,14 +725,15 @@ class Kowalski:
                         # if it has a single "catalog" key, we remove it as we will replace it with a "catalogs" key
                         if "catalog" in queries[instance_name]["query"]:
                             del queries[instance_name]["query"]["catalog"]
+                            del queries[instance_name]["query"]["projection"]
                         queries[instance_name]["query"]["catalogs"] = {
                             catalog: query["query"]["catalogs"][catalog]
                         }
                     else:
                         # if the instance already has a query, we add the current catalog to the list of catalogs
-                        queries[instance_name]["query"]["catalogs"][catalog] = query[
-                            "query"
-                        ]["catalogs"][catalog]
+                        queries[instance_name]["query"]["catalogs"][catalog] = catalogs[
+                            catalog
+                        ]
         else:
             # if a name is specified, we check if the instance has all the catalogs
             if not all(
