@@ -475,6 +475,10 @@ class Kowalski:
                 )
 
             if use_batch_query:
+                if len(query_split_in_queries) == 0:
+                    raise ValueError(
+                        f"No valid query found in {str(query)}\n which yielded {str(query_split_in_queries)}"
+                    )
                 # this return a dict of instance and one query, but we want a dict of instance and a list of queries for batch_query
                 query_split_in_queries = {
                     name: [query] for name, query in query_split_in_queries.items()
