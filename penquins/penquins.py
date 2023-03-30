@@ -707,7 +707,7 @@ class Kowalski:
                     "For catalog-less queries, please specify instance name"
                 )
             else:
-                return {name: query}
+                return {name: query}, instances_load
 
         if (
             query["query_type"] in query_type_one_catalog
