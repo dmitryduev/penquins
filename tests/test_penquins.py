@@ -186,18 +186,17 @@ class TestPenquins:
 
         response = k.query(query=query)
 
-        # the response should be like:
-        # {'default': {'status': 'success', 'message': 'Successfully executed query', 'data': {'ZTF_alerts': {'ZTF17aaaaaas': [{'objectId': 'ZTF17aaaaaas'}]},
-        # 'PGIR_alerts': {'ZTF17aaaaaas': []}}}}
-
+        # the code splits the load between instances if catalogs are available in both, so we should get:
         assert "default" in response
-        data = response["default"].get("data")
-        assert catalog_1 in data
-        assert catalog_2 in data
-        assert obj_id in data[catalog_1]
-        assert obj_id in data[catalog_2]
-        assert len(data[catalog_1][obj_id]) > 0
-        assert len(data[catalog_2][obj_id]) == 0
+        data_default = response["default"].get("data")
+        assert "test" in response
+        data_test = response["test"].get("data")
+        assert catalog_1 in data_default
+        assert catalog_2 in data_test
+        assert obj_id in data_default[catalog_1]
+        assert obj_id in data_test[catalog_2]
+        assert len(data_default[catalog_1][obj_id]) > 0
+        assert len(data_test[catalog_2][obj_id]) == 0
 
         k.instances["default"][
             "catalogs"
@@ -207,10 +206,6 @@ class TestPenquins:
         # this is to test the fallback to the second instance
 
         response = k.query(query=query)
-
-        # the response should be like:
-        # {'test': {'status': 'success', 'message': 'Successfully executed query', 'data': {'ZTF_alerts': {'ZTF17aaaaaas': [{'objectId': 'ZTF17aaaaaas'}]},
-        # 'PGIR_alerts': {'ZTF17aaaaaas': []}}}}
 
         assert "test" in response
         data = response["test"].get("data")
@@ -230,10 +225,6 @@ class TestPenquins:
 
         response = k.query(query=query)
 
-        # the response should be like:
-        # {'test': {...}, 'default': {...}}
-        # 'PGIR_alerts': {'ZTF17aaaaaas': []}}}}
-
         assert "default" in response
         data = response["default"].get("data")
         assert catalog_1 in data
@@ -247,6 +238,57 @@ class TestPenquins:
         assert catalog_2 in data
         assert obj_id in data[catalog_2]
         assert len(data[catalog_2][obj_id]) == 0
+
+    def test_batch_query_cone_search_multiple_catalogs_multiple_instances(self):
+        token = self.kowalski.instances["default"]["token"]
+
+        k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
+
+        cfg = {
+            "token": token,
+            "protocol": "http",  # here we change the protocol
+            "host": "127.0.0.1",  # this is the trick we use to test the add() method running only one kowalski instance
+            "port": 4000,
+        }
+        k.add(name="test", cfg=cfg)
+
+        catalog_1 = "ZTF_alerts"
+        catalog_2 = "PGIR_alerts"
+        obj_id = "ZTF17aaaaaas"
+
+        query = {
+            "query_type": "cone_search",
+            "query": {
+                "object_coordinates": {
+                    "cone_search_radius": 2,
+                    "cone_search_unit": "arcsec",
+                    "radec": {
+                        obj_id: [
+                            68.578209,
+                            49.0871395,
+                        ]
+                    },
+                },
+                "catalogs": {
+                    catalog_1: {"filter": {}, "projection": {"_id": 0, "objectId": 1}},
+                    catalog_2: {"filter": {}, "projection": {"_id": 0, "objectId": 1}},
+                },
+            },
+            "kwargs": {"filter_first": False},
+        }
+
+        response = k.query(query=query, use_batch_query=True)
+        assert "default" in response
+
+        data_default = response["default"][0].get("data")
+        assert "test" in response
+        data_test = response["test"][0].get("data")
+        assert catalog_1 in data_default
+        assert catalog_2 in data_test
+        assert obj_id in data_default[catalog_1]
+        assert obj_id in data_test[catalog_2]
+        assert len(data_default[catalog_1][obj_id]) > 0
+        assert len(data_test[catalog_2][obj_id]) == 0
 
     def test_query_find(self):
         catalog = "ZTF_alerts"

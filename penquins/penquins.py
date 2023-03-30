@@ -141,7 +141,6 @@ class Kowalski:
         for name, cfg in instances.items():
             self.add(name, cfg, **kwargs)
 
-    # we create the method to add an instance to the class
     def add(self, name, cfg, **kwargs):
         # verify that no instance with the same name already exists
         if name in self.instances:
@@ -252,6 +251,11 @@ class Kowalski:
             if len(self.instances) == 1:
                 self.multiple_instances = False
             raise ValueError(f"Failed to add instance {name}: {e}")
+
+    def remove(self, name):
+        if name not in list(self.instances.keys()):
+            raise ValueError(f"Instance {name} does not exist")
+        del self.instances[name]
 
     def __enter__(self):
         return self
@@ -386,13 +390,15 @@ class Kowalski:
         """
         # the queries are a dict with the key being the instance name, and the value being a query
         # we want to reformat it to a list of tuples, where the first element is the query, and the second is the instance name
-        # we also want to make sure that the queries are unique
         queries_name_tpl = []
         for name, queries in queries.items():
             for query in queries:
                 queries_name_tpl.append((query, name))
 
         n_threads = min(len(queries), n_threads)
+
+        # if running some tests, you might want to uncomment this to make sure you are using the correct number of threads
+        # print(f"Running {len(queries)} queries on {n_threads} threads")
 
         with ThreadPool(processes=n_threads) as pool:
             if self.v:
@@ -454,7 +460,7 @@ class Kowalski:
         if query is not None and queries is not None:
             raise ValueError("Please specify either query or queries, not both")
         if query is not None:
-            query_split_in_queries = self.prepare_query(query, name=name)
+            query_split_in_queries, _ = self.prepare_query(query, name=name)
 
             if name is not None:
                 return self.single_query(query_split_in_queries[name], name=name)
@@ -466,10 +472,21 @@ class Kowalski:
                 )
 
             if use_batch_query:
+                # this return a dict of instance and one query, but we want a dict of instance and a list of queries for batch_query
+                query_split_in_queries = {
+                    name: [query] for name, query in query_split_in_queries.items()
+                }
                 # the n_threads parameter is the number of instances, maxed at max_n_threads
-                return self.batch_query(
-                    query_split_in_queries, n_threads=min(len(queries), max_n_threads)
+                results = self.batch_query(
+                    query_split_in_queries, n_threads=max_n_threads
                 )
+                # the results are a list of dicts, we want a single dict with the instance name as key and the list of the queries for that instance as value
+                final_results = {
+                    name: [result[name] for result in results if name in result]
+                    for name in query_split_in_queries.keys()
+                }
+                return final_results
+
             else:
                 results = {}
                 for name, query in query_split_in_queries.items():
@@ -481,9 +498,15 @@ class Kowalski:
             queries_split_in_queries = self.prepare_queries(queries)
             if use_batch_query:
                 # the n_threads parameter is the number of instances, maxed at max_n_threads
-                return self.batch_query(
-                    queries_split_in_queries, n_threads=min(len(queries), max_n_threads)
+                results = self.batch_query(
+                    queries_split_in_queries, n_threads=max_n_threads
                 )
+                # the results are a list of dicts, we want a single dict with the instance name as key and the list of the queries for that instance as value
+                final_results = {
+                    name: [result[name] for result in results if name in result]
+                    for name in queries_split_in_queries.keys()
+                }
+                return final_results
             else:
                 results = {}
                 for name, query in queries_split_in_queries.items():
@@ -610,7 +633,7 @@ class Kowalski:
 
             queries.append(query)
 
-        responses = self.query(
+        response = self.query(
             queries=queries, use_batch_query=True, max_n_threads=max_n_threads
         )
 
@@ -619,10 +642,10 @@ class Kowalski:
             for name in list(self.instances.keys())
         }
 
-        for r in responses:
-            # first we have on response per query. Each response contains a dict with one key per instance
-            for name in list(r.keys()):
-                data = r[name].get("data", None)
+        # first we have on response per query. Each response contains a dict with one key per instance
+        for name in list(response.keys()):
+            for response in response[name]:
+                data = response.get("data", None)
                 if data is None:
                     continue
                 for catalog in catalogs:
@@ -675,7 +698,7 @@ class Kowalski:
                 )
         return catalog in self.instances[name]["catalogs"]
 
-    def prepare_query(self, query, name=None) -> dict:
+    def prepare_query(self, query, name=None, instances_load=None) -> dict:
         """Based on the catalogs or catalog specified in the query, split the query into multiple queries for each instance"""
         # we will return a dict of instances and their queries
         if "catalogs" not in query["query"] and "catalog" not in query["query"]:
@@ -700,6 +723,9 @@ class Kowalski:
             raise ValueError(
                 f"Query type {query['query_type']} requires multiple catalogs key (which can contain just one catalog if you want)"
             )
+
+        if instances_load is None:
+            instances_load = {name: 0 for name in self.instances.keys()}
 
         # now we check if the query is for a single catalog or multiple catalogs
         if "catalogs" in query["query"]:
@@ -728,11 +754,29 @@ class Kowalski:
                         "One or more catalogs specified in the query are not available in the instance"
                     )
                 queries[name] = query
+                instances_load[name] += 1
             # if no name is specified and we have multiple instances, we split the query into multiple queries by instance based on the catalogs
+            elif len(catalogs) == 1:
+                # if we have just one catalog, we can just use the original query but first we check in which instance it is available
+                catalog = list(catalogs.keys())[0]
+                instances_having_catalog = {
+                    instance_name: self.instance_has_catalog(
+                        catalog, name=instance_name
+                    )
+                    for instance_name in self.instances.keys()
+                }
+                if not any(instances_having_catalog.values()):
+                    raise ValueError(
+                        f"Catalog {catalog} is not available in any instance"
+                    )
+                # we pick an instance that has the catalog
+                instance_name = list(instances_having_catalog.keys())[
+                    list(instances_having_catalog.values()).index(True)
+                ]
+                queries[instance_name] = query
+                instances_load[instance_name] += 1
             else:
-                if len(catalogs) == 1:
-                    # if we have just one catalog, we can just use the original query but first we check in which instance it is available
-                    catalog = list(catalogs.keys())[0]
+                for catalog in catalogs:
                     instances_having_catalog = {
                         instance_name: self.instance_has_catalog(
                             catalog, name=instance_name
@@ -743,47 +787,37 @@ class Kowalski:
                         raise ValueError(
                             f"Catalog {catalog} is not available in any instance"
                         )
-                    # else we take the first instance that has the catalog
-                    instance_name = list(instances_having_catalog.keys())[
-                        list(instances_having_catalog.values()).index(True)
-                    ]
-                    queries[instance_name] = query
-                    return queries
-                else:
-                    for catalog in catalogs:
-                        instances_having_catalog = {
-                            instance_name: self.instance_has_catalog(
-                                catalog, name=instance_name
-                            )
-                            for instance_name in self.instances.keys()
-                        }
-                        if not any(instances_having_catalog.values()):
-                            raise ValueError(
-                                f"Catalog {catalog} is not available in any instance"
-                            )
 
-                        # we take the first instance that has the catalog
-                        instance_name = list(instances_having_catalog.keys())[
-                            list(instances_having_catalog.values()).index(True)
+                    # we want to split the load between the instances, so we pick the instance with the least load that has the catalog
+                    instance_name = min(
+                        # keep only the instances that have the catalog (True)
+                        {
+                            k: v
+                            for k, v in instances_having_catalog.items()
+                            if v is True
+                        },
+                        key=lambda k: instances_load[k],
+                    )
+                    instances_load[instance_name] += 1
+
+                    if queries[instance_name] is None:
+                        # we set it to a copy of the original query, but with only the current catalog
+                        queries[instance_name] = deepcopy(query)
+                        # if it has a single "catalog" key, we remove it as we will replace it with a "catalogs" key
+                        if "catalog" in queries[instance_name]["query"]:
+                            del queries[instance_name]["query"]["catalog"]
+                            if "projection" in queries[instance_name]["query"]:
+                                del queries[instance_name]["query"]["projection"]
+                            if "filter" in queries[instance_name]["query"]:
+                                del queries[instance_name]["query"]["filter"]
+                        queries[instance_name]["query"]["catalogs"] = {
+                            catalog: catalogs[catalog]
+                        }
+                    else:
+                        # if the instance already has a query, we add the current catalog to the list of catalogs
+                        queries[instance_name]["query"]["catalogs"][catalog] = catalogs[
+                            catalog
                         ]
-                        if queries[instance_name] is None:
-                            # we set it to a copy of the original query, but with only the current catalog
-                            queries[instance_name] = deepcopy(query)
-                            # if it has a single "catalog" key, we remove it as we will replace it with a "catalogs" key
-                            if "catalog" in queries[instance_name]["query"]:
-                                del queries[instance_name]["query"]["catalog"]
-                                if "projection" in queries[instance_name]["query"]:
-                                    del queries[instance_name]["query"]["projection"]
-                                if "filter" in queries[instance_name]["query"]:
-                                    del queries[instance_name]["query"]["filter"]
-                            queries[instance_name]["query"]["catalogs"] = {
-                                catalog: catalogs[catalog]
-                            }
-                        else:
-                            # if the instance already has a query, we add the current catalog to the list of catalogs
-                            queries[instance_name]["query"]["catalogs"][
-                                catalog
-                            ] = catalogs[catalog]
         else:
             # if a name is specified, we check if the instance has all the catalogs
             if not all(
@@ -793,15 +827,19 @@ class Kowalski:
                     "One or more catalogs specified in the query are not available in the specified instance"
                 )
             queries[name] = query
+            instances_load[name] += 1
 
-        return queries
+        return queries, instances_load
 
     def prepare_queries(self, queries, name=None) -> dict:
         """Based on the catalogs or catalog specified in the queries, split the queries into multiple queries for each instance"""
         # we will return a dict of instances and their queries
         queries_per_instance = {name: [] for name in self.instances.keys()}
+        instances_load = {name: 0 for name in self.instances.keys()}
         for query in queries:
-            query_per_instance = self.prepare_query(query, name=name)
+            query_per_instance, instances_load = self.prepare_query(
+                query, name=name, instances_load=instances_load
+            )
             for instance_name, query in query_per_instance.items():
                 queries_per_instance[instance_name].append(query)
 
