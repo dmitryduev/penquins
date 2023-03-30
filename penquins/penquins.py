@@ -405,11 +405,13 @@ class Kowalski:
             if self.v:
                 return tqdm(
                     pool.starmap(
-                        self.single_query, queries_name_tpl, chunksize=len(queries)
+                        self.single_query,
+                        queries_name_tpl,
+                        chunksize=len(queries_name_tpl),
                     )
                 )
             return pool.starmap(
-                self.single_query, queries_name_tpl, chunksize=len(queries)
+                self.single_query, queries_name_tpl, chunksize=len(queries_name_tpl)
             )
 
     def single_query(self, query: Mapping, name=None):
@@ -497,6 +499,10 @@ class Kowalski:
 
         if queries is not None:
             queries_split_in_queries = self.prepare_queries(queries)
+            if len(queries_split_in_queries) == 0:
+                raise ValueError(
+                    f"No valid queries found in {str(queries)}\n which yielded {str(queries_split_in_queries)}"
+                )
             if use_batch_query:
                 # the n_threads parameter is the number of instances, maxed at max_n_threads
                 results = self.batch_query(
