@@ -537,3 +537,12 @@ class TestPenquins:
             len(list(q["test"]["data"][0].keys())) == 1
         )  # we verify that the projection worked
         assert "objectId" in q["test"]["data"][0].keys()
+
+    def test_catalogsless_query(self):
+        """Here we want to test a query that is not on catalogs but on the database itself"""
+        query = {"query_type": "info", "query": {"command": "catalog_names"}}
+        response = self.kowalski.query(query=query)
+
+        assert "default" in response
+        assert "data" in response["default"]
+        assert "ZTF_alerts" in response["default"]["data"]

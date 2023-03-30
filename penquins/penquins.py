@@ -702,12 +702,13 @@ class Kowalski:
         """Based on the catalogs or catalog specified in the query, split the query into multiple queries for each instance"""
         # we will return a dict of instances and their queries
         if "catalogs" not in query["query"] and "catalog" not in query["query"]:
+            if name is None and not self.multiple_instances:
+                name = list(self.instances.keys())[0]
             if name is None:
                 raise ValueError(
-                    "For catalog-less queries, please specify instance name"
+                    "For catalog-less queries, please specify instance name if using multiple instances"
                 )
-            else:
-                return {name: query}, instances_load
+            return {name: query}, instances_load
 
         if (
             query["query_type"] in query_type_one_catalog
