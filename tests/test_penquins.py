@@ -105,33 +105,27 @@ class TestPenquins:
         assert obj_id in data[catalog]
         assert len(data[catalog][obj_id]) > 0
 
-    def test_query_cone_search_multiple_catalogs(self):
-        catalog_1 = "ZTF_alerts"
-        catalog_2 = "PGIR_alerts"
-        obj_id = "ZTF17aaaaaas"
+    def test_multiple_queries_multiple_catalogs(self):
+        token = self.kowalski.instances["default"]["token"]
+        k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
 
-        query = {
-            "query_type": "cone_search",
-            "query": {
-                "object_coordinates": {
-                    "cone_search_radius": 2,
-                    "cone_search_unit": "arcsec",
-                    "radec": {
-                        obj_id: [
-                            68.578209,
-                            49.0871395,
-                        ]
-                    },
-                },
-                "catalogs": {
-                    catalog_1: {"filter": {}, "projection": {"_id": 0, "objectId": 1}},
-                    catalog_2: {"filter": {}, "projection": {"_id": 0, "objectId": 1}},
-                },
-            },
-            "kwargs": {"filter_first": False},
-        }
+        catalogs = ["ZTF_alerts", "PGIR_alerts"]
+        obj_ids = ["ZTF17aaaaaas", "ZTF19acvmcdd"]
 
-        response = self.kowalski.query(query=query)
+        queries = [
+            {
+                "query_type": "find",
+                "query": {
+                    "catalog": catalog,
+                    "filter": {"objectId": {"$in": obj_ids}},
+                    "projection": {"_id": 0, "objectId": 1},
+                },
+                "kwargs": {"filter_first": False},
+            }
+            for catalog in catalogs
+        ]
+
+        response = k.query(queries=queries)
 
         # the response should be like:
         # {'default': {'status': 'success', 'message': 'Successfully executed query', 'data': {'ZTF_alerts': {'ZTF17aaaaaas': [{'objectId': 'ZTF17aaaaaas'}]},
@@ -139,12 +133,37 @@ class TestPenquins:
 
         assert "default" in response
         data = response["default"].get("data")
-        assert catalog_1 in data
-        assert catalog_2 in data
-        assert obj_id in data[catalog_1]
-        assert obj_id in data[catalog_2]
-        assert len(data[catalog_1][obj_id]) > 0
-        assert len(data[catalog_2][obj_id]) == 0
+
+        # now the same but running them in parallel
+        response = k.query(queries=queries, use_batch_query=True)
+        assert "default" in response
+        data = response["default"][0].get("data")
+        assert len(data) > 0
+
+        # now we add a new instance and run the same queries (non parallel and parallel)
+        cfg = {
+            "token": token,
+            "protocol": "http",  # here we change the protocol
+            "host": "127.0.0.1",  # this is the trick we use to test the add() method running only one kowalski instance
+            "port": 4000,
+        }
+        k.add(name="test", cfg=cfg)
+
+        response = k.query(queries=queries, use_batch_query=False)
+        assert "default" in response
+        assert "test" in response
+        data = response["default"].get("data")
+        assert len(data) > 0
+        data = response["test"].get("data")
+        assert len(data) == 0
+
+        response = k.query(queries=queries, use_batch_query=True)
+        assert "default" in response
+        assert "test" in response
+        data = response["default"][0].get("data")
+        assert len(data) > 0
+        data = response["test"][0].get("data")
+        assert len(data) == 0
 
     def test_query_cone_search_multiple_catalogs_multiple_instances(self):
         token = self.kowalski.instances["default"]["token"]

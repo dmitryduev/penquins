@@ -388,8 +388,8 @@ class Kowalski:
         :param n_threads: number of processes to use
         :return:
         """
-        # the queries are a dict with the key being the instance name, and the value being a query
         # we want to reformat it to a list of tuples, where the first element is the query, and the second is the instance name
+
         queries_name_tpl = []
         for name, queries in queries.items():
             for query in queries:
@@ -509,9 +509,10 @@ class Kowalski:
                 return final_results
             else:
                 results = {}
-                for name, query in queries_split_in_queries.items():
-                    if query is not None:
-                        results.update(self.single_query(query, name=name))
+                for name in queries_split_in_queries.keys():
+                    for query in queries_split_in_queries[name]:
+                        if query is not None:
+                            results.update(self.single_query(query, name=name))
                 return results
 
     def ping(self, name=None) -> bool:
@@ -771,9 +772,12 @@ class Kowalski:
                         f"Catalog {catalog} is not available in any instance"
                     )
                 # we pick an instance that has the catalog
-                instance_name = list(instances_having_catalog.keys())[
-                    list(instances_having_catalog.values()).index(True)
-                ]
+                instance_name = min(
+                    # keep only the instances that have the catalog (True)
+                    {k: v for k, v in instances_having_catalog.items() if v is True},
+                    key=lambda k: instances_load[k],
+                )
+                instances_load[instance_name] += 1
                 queries[instance_name] = query
                 instances_load[instance_name] += 1
             else:
@@ -841,8 +845,10 @@ class Kowalski:
             query_per_instance, instances_load = self.prepare_query(
                 query, name=name, instances_load=instances_load
             )
+
             for instance_name, query in query_per_instance.items():
-                queries_per_instance[instance_name].append(query)
+                if query is not None:
+                    queries_per_instance[instance_name].append(query)
 
         return queries_per_instance
 
