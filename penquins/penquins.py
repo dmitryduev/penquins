@@ -33,6 +33,15 @@ DEFAULT_TIMEOUT: int = 5  # seconds
 DEFAULT_RETRIES: int = 3
 DEFAULT_BACKOFF_FACTOR: int = 1
 
+query_type_one_catalog = [
+    "find_one",
+    "find",
+    "schemas",
+    "count_documents",
+    "estimated_document_count",
+]
+query_type_multiple_catalogs = ["cone_search", "near"]
+
 
 def get_cones(path, cumprob):  # path or file-like object
     max_order = None
@@ -82,7 +91,6 @@ class Kowalski:
 
     multiple_instances = True
     instances = {}
-    instances_per_catalog = {}
 
     def __init__(
         self,
@@ -238,11 +246,6 @@ class Kowalski:
 
             catalogs = self.get_catalogs(name)
             self.instances[name]["catalogs"] = catalogs
-            self.instances_per_catalog = {
-                catalog: name
-                for name, instance in self.instances.items()
-                for catalog in instance["catalogs"]
-            }
 
         except Exception as e:
             del self.instances[name]
@@ -469,8 +472,9 @@ class Kowalski:
                 )
             else:
                 results = {}
-                for name, query in queries.items():
-                    results.update(self.single_query(query, name=name))
+                for name, query in query_split_in_queries.items():
+                    if query is not None:
+                        results.update(self.single_query(query, name=name))
                 return results
 
         if queries is not None:
@@ -482,8 +486,9 @@ class Kowalski:
                 )
             else:
                 results = {}
-                for name, query in queries.items():
-                    results.update(self.single_query(query, name=name))
+                for name, query in queries_split_in_queries.items():
+                    if query is not None:
+                        results.update(self.single_query(query, name=name))
                 return results
 
     def ping(self, name=None) -> bool:
@@ -680,11 +685,33 @@ class Kowalski:
                 )
             else:
                 return {name: query}
+
+        if (
+            query["query_type"] in query_type_one_catalog
+            and "catalog" not in query["query"]
+        ):
+            raise ValueError(
+                f"Query type {query['query_type']} requires a single catalog"
+            )
+        if (
+            query["query_type"] in query_type_multiple_catalogs
+            and "catalogs" not in query["query"]
+        ):
+            raise ValueError(
+                f"Query type {query['query_type']} requires multiple catalogs key (which can contain just one catalog if you want)"
+            )
+
         # now we check if the query is for a single catalog or multiple catalogs
         if "catalogs" in query["query"]:
             catalogs = query["query"]["catalogs"]
         else:
-            catalogs = {query["query"]["catalog"]: query["query"]["projection"]}
+            catalogs = {query["query"]["catalog"]: {}}
+            if "projection" in query["query"]:
+                catalogs[query["query"]["catalog"]]["projection"] = query["query"][
+                    "projection"
+                ]
+            if "filter" in query["query"]:
+                catalogs[query["query"]["catalog"]]["filter"] = query["query"]["filter"]
 
         queries = {name: None for name in self.instances.keys()}
         if name is None:
@@ -703,7 +730,9 @@ class Kowalski:
                 queries[name] = query
             # if no name is specified and we have multiple instances, we split the query into multiple queries by instance based on the catalogs
             else:
-                for catalog in catalogs:
+                if len(catalogs) == 1:
+                    # if we have just one catalog, we can just use the original query but first we check in which instance it is available
+                    catalog = list(catalogs.keys())[0]
                     instances_having_catalog = {
                         instance_name: self.instance_has_catalog(
                             catalog, name=instance_name
@@ -714,26 +743,47 @@ class Kowalski:
                         raise ValueError(
                             f"Catalog {catalog} is not available in any instance"
                         )
-
-                    # we take the first instance that has the catalog
+                    # else we take the first instance that has the catalog
                     instance_name = list(instances_having_catalog.keys())[
                         list(instances_having_catalog.values()).index(True)
                     ]
-                    if queries[instance_name] is None:
-                        # we set it to a copy of the original query, but with only the current catalog
-                        queries[instance_name] = deepcopy(query)
-                        # if it has a single "catalog" key, we remove it as we will replace it with a "catalogs" key
-                        if "catalog" in queries[instance_name]["query"]:
-                            del queries[instance_name]["query"]["catalog"]
-                            del queries[instance_name]["query"]["projection"]
-                        queries[instance_name]["query"]["catalogs"] = {
-                            catalog: catalogs[catalog]
+                    queries[instance_name] = query
+                    return queries
+                else:
+                    for catalog in catalogs:
+                        instances_having_catalog = {
+                            instance_name: self.instance_has_catalog(
+                                catalog, name=instance_name
+                            )
+                            for instance_name in self.instances.keys()
                         }
-                    else:
-                        # if the instance already has a query, we add the current catalog to the list of catalogs
-                        queries[instance_name]["query"]["catalogs"][catalog] = catalogs[
-                            catalog
+                        if not any(instances_having_catalog.values()):
+                            raise ValueError(
+                                f"Catalog {catalog} is not available in any instance"
+                            )
+
+                        # we take the first instance that has the catalog
+                        instance_name = list(instances_having_catalog.keys())[
+                            list(instances_having_catalog.values()).index(True)
                         ]
+                        if queries[instance_name] is None:
+                            # we set it to a copy of the original query, but with only the current catalog
+                            queries[instance_name] = deepcopy(query)
+                            # if it has a single "catalog" key, we remove it as we will replace it with a "catalogs" key
+                            if "catalog" in queries[instance_name]["query"]:
+                                del queries[instance_name]["query"]["catalog"]
+                                if "projection" in queries[instance_name]["query"]:
+                                    del queries[instance_name]["query"]["projection"]
+                                if "filter" in queries[instance_name]["query"]:
+                                    del queries[instance_name]["query"]["filter"]
+                            queries[instance_name]["query"]["catalogs"] = {
+                                catalog: catalogs[catalog]
+                            }
+                        else:
+                            # if the instance already has a query, we add the current catalog to the list of catalogs
+                            queries[instance_name]["query"]["catalogs"][
+                                catalog
+                            ] = catalogs[catalog]
         else:
             # if a name is specified, we check if the instance has all the catalogs
             if not all(
@@ -756,3 +806,15 @@ class Kowalski:
                 queries_per_instance[instance_name].append(query)
 
         return queries_per_instance
+
+    def rename(self, name, old_name=None):
+        """Rename an instance"""
+        if old_name is None:
+            if not self.multiple_instances:
+                old_name = list(self.instances.keys())[0]
+            else:
+                raise ValueError(
+                    "Please specify instance name when using multiple instances"
+                )
+        self.instances[name] = self.instances[old_name]
+        del self.instances[old_name]
