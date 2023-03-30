@@ -540,9 +540,25 @@ class TestPenquins:
 
     def test_catalogsless_query(self):
         """Here we want to test a query that is not on catalogs but on the database itself"""
+        token = self.kowalski.instances["default"]["token"]
+
+        k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
+
         query = {"query_type": "info", "query": {"command": "catalog_names"}}
-        response = self.kowalski.query(query=query)
+        response = k.query(query=query)
 
         assert "default" in response
         assert "data" in response["default"]
         assert "ZTF_alerts" in response["default"]["data"]
+
+        # now we should raise an error for those, as queries that dont specify catalogs should specify on which instance to run
+        cfg = {
+            "token": token,
+            "protocol": "http",  # here we change the protocol
+            "host": "127.0.0.1",  # this is the trick we use to test the add() method running only one kowalski instance
+            "port": 4000,
+        }
+        k.add(name="test", cfg=cfg)
+
+        with pytest.raises(ValueError):
+            k.query(query=query)
