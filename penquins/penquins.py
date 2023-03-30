@@ -395,7 +395,8 @@ class Kowalski:
             for query in queries:
                 queries_name_tpl.append((query, name))
 
-        n_threads = min(len(queries), n_threads)
+        min_threads = max(1, len(queries_name_tpl))
+        n_threads = min(min_threads, n_threads)
 
         # if running some tests, you might want to uncomment this to make sure you are using the correct number of threads
         # print(f"Running {len(queries)} queries on {n_threads} threads")
