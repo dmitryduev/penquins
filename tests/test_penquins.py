@@ -72,7 +72,7 @@ class TestPenquins:
 
     def test_query_cone_search(self):
         catalog = "ZTF_alerts"
-        obj_id = "ZTF17aaaaaas"
+        obj_id = "ZTF18abacqpw"
 
         query = {
             "query_type": "cone_search",
@@ -97,7 +97,7 @@ class TestPenquins:
         response = self.kowalski.query(query=query)
 
         # the response should be like:
-        # {'default': {'status': 'success', 'message': 'Successfully executed query', 'data': {'ZTF_alerts': {'ZTF17aaaaaas': [{'objectId': 'ZTF17aaaaaas'}]}}}}
+        # {'default': {'status': 'success', 'message': 'Successfully executed query', 'data': {'ZTF_alerts': {'ZTF18abacqpw': [{'objectId': 'ZTF18abacqpw'}]}}}}
 
         assert "default" in response
         data = response["default"].get("data")
@@ -110,7 +110,7 @@ class TestPenquins:
         k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
 
         catalogs = ["ZTF_alerts", "PGIR_alerts"]
-        obj_ids = ["ZTF17aaaaaas", "ZTF19acvmcdd"]
+        obj_ids = ["ZTF18abacqpw", "ZTF19acvmcdd"]
 
         queries = [
             {
@@ -128,8 +128,8 @@ class TestPenquins:
         response = k.query(queries=queries)
 
         # the response should be like:
-        # {'default': {'status': 'success', 'message': 'Successfully executed query', 'data': {'ZTF_alerts': {'ZTF17aaaaaas': [{'objectId': 'ZTF17aaaaaas'}]},
-        # 'PGIR_alerts': {'ZTF17aaaaaas': []}}}}
+        # {'default': {'status': 'success', 'message': 'Successfully executed query', 'data': {'ZTF_alerts': {'ZTF18abacqpw': [{'objectId': 'ZTF18abacqpw'}]},
+        # 'PGIR_alerts': {'ZTF18abacqpw': []}}}}
 
         assert "default" in response
         data = response["default"].get("data")
@@ -180,7 +180,7 @@ class TestPenquins:
 
         catalog_1 = "ZTF_alerts"
         catalog_2 = "PGIR_alerts"
-        obj_id = "ZTF17aaaaaas"
+        obj_id = "ZTF18abacqpw"
 
         query = {
             "query_type": "cone_search",
@@ -273,7 +273,7 @@ class TestPenquins:
 
         catalog_1 = "ZTF_alerts"
         catalog_2 = "PGIR_alerts"
-        obj_id = "ZTF17aaaaaas"
+        obj_id = "ZTF18abacqpw"
 
         query = {
             "query_type": "cone_search",
@@ -311,7 +311,7 @@ class TestPenquins:
 
     def test_query_find(self):
         catalog = "ZTF_alerts"
-        obj_id = "ZTF17aaaaaas"
+        obj_id = "ZTF18abacqpw"
 
         query = {
             "query_type": "find",
@@ -498,7 +498,7 @@ class TestPenquins:
 
         catalog = "ZTF_alerts"
 
-        obj_id = "ZTF17aaaaaas"
+        obj_id = "ZTF18abacqpw"
 
         query = {
             "query_type": "find",

@@ -10,7 +10,7 @@ from copy import deepcopy
 from multiprocessing.pool import ThreadPool
 from netrc import netrc
 from pathlib import Path
-from typing import List, Mapping, Optional, Sequence, Union
+from typing import List, Mapping, Optional, Sequence, Union, Tuple
 
 import astropy.units as u
 import astropy_healpix as ah
@@ -403,23 +403,27 @@ class Kowalski:
 
         with ThreadPool(processes=n_threads) as pool:
             if self.v:
-                return tqdm(
-                    pool.starmap(
-                        self.single_query,
-                        queries_name_tpl,
-                        chunksize=len(queries_name_tpl),
+                return list(
+                    tqdm(
+                        pool.imap(
+                            self.single_query,
+                            queries_name_tpl,
+                            # chunksize=len(queries_name_tpl),
+                        )
                     )
                 )
-            return pool.starmap(
-                self.single_query, queries_name_tpl, chunksize=len(queries_name_tpl)
-            )
+            # return list(pool.imap(
+            #     self.single_query, queries_name_tpl, chunksize=len(queries_name_tpl)
+            # ))
+            return list(pool.imap(self.single_query, queries_name_tpl))
 
-    def single_query(self, query: Mapping, name=None):
+    def single_query(self, query_tpl: Tuple[Mapping, str]):
         """Call Kowalski's /api/queries endpoint using multiple processes
 
         :param query: query mapping
         :return:
         """
+        query, name = query_tpl
         _query = deepcopy(query)
 
         # by default, all queries are not registered in the db and the task/results are stored on disk as json files
@@ -466,12 +470,14 @@ class Kowalski:
             query_split_in_queries, _ = self.prepare_query(query, name=name)
 
             if name is not None:
-                return self.single_query(query_split_in_queries[name], name=name)
+                return self.single_query((query_split_in_queries[name], name))
 
             if len(query_split_in_queries) == 1:
                 return self.single_query(
-                    query_split_in_queries[list(query_split_in_queries.keys())[0]],
-                    list(query_split_in_queries.keys())[0],
+                    (
+                        query_split_in_queries[list(query_split_in_queries.keys())[0]],
+                        list(query_split_in_queries.keys())[0],
+                    )
                 )
 
             if use_batch_query:
@@ -498,7 +504,7 @@ class Kowalski:
                 results = {}
                 for name, query in query_split_in_queries.items():
                     if query is not None:
-                        results.update(self.single_query(query, name=name))
+                        results.update(self.single_query((query, name)))
                 return results
 
         if queries is not None:
@@ -523,7 +529,7 @@ class Kowalski:
                 for name in queries_split_in_queries.keys():
                     for query in queries_split_in_queries[name]:
                         if query is not None:
-                            results.update(self.single_query(query, name=name))
+                            results.update(self.single_query((query, name)))
                 return results
 
     def ping(self, name=None) -> bool:
@@ -691,7 +697,7 @@ class Kowalski:
                 "command": "catalog_names",
             },
         }
-        response = self.single_query(query=query, name=name)
+        response = self.single_query((query, name))
         return response[name].get("data")
 
     def get_catalogs_all(self) -> dict:
