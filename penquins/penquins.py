@@ -399,8 +399,8 @@ class Kowalski:
         n_threads = min(min_threads, n_threads)
 
         # if running some tests, you might want to uncomment this to make sure you are using the correct number of threads
-        # print(f"Running {len(queries)} queries on {n_threads} threads")
-
+        # print(f"Split the {len(queries)} queries dict (instance: queries) into {len(queries_name_tpl)} queries tuple (instance, query)")
+        # print(f"Running {len(queries_name_tpl)} queries on {n_threads} threads")
         with ThreadPool(processes=n_threads) as pool:
             if self.v:
                 return list(
