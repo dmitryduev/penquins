@@ -66,15 +66,13 @@ class TestPenquins:
     """
 
     def test_token_authorization(self):
-        token = self.kowalski.token
-
+        token = self.kowalski.instances["default"]["token"]
         k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
-
         assert k.ping()
 
     def test_query_cone_search(self):
         catalog = "ZTF_alerts"
-        obj_id = "ZTF17aaaaaas"
+        obj_id = "ZTF18abacqpw"
 
         query = {
             "query_type": "cone_search",
@@ -97,15 +95,223 @@ class TestPenquins:
         }
 
         response = self.kowalski.query(query=query)
-        assert "data" in response
-        data = response.get("data")
+
+        # the response should be like:
+        # {'default': {'status': 'success', 'message': 'Successfully executed query', 'data': {'ZTF_alerts': {'ZTF18abacqpw': [{'objectId': 'ZTF18abacqpw'}]}}}}
+
+        assert "default" in response
+        data = response["default"].get("data")
         assert catalog in data
         assert obj_id in data[catalog]
         assert len(data[catalog][obj_id]) > 0
 
+    def test_multiple_queries_multiple_catalogs(self):
+        token = self.kowalski.instances["default"]["token"]
+        k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
+
+        catalogs = ["ZTF_alerts", "PGIR_alerts"]
+        obj_ids = ["ZTF18abacqpw", "ZTF19acvmcdd"]
+
+        queries = [
+            {
+                "query_type": "find",
+                "query": {
+                    "catalog": catalog,
+                    "filter": {"objectId": {"$in": obj_ids}},
+                    "projection": {"_id": 0, "objectId": 1},
+                },
+                "kwargs": {"filter_first": False},
+            }
+            for catalog in catalogs
+        ]
+
+        response = k.query(queries=queries)
+
+        # the response should be like:
+        # {'default': {'status': 'success', 'message': 'Successfully executed query', 'data': {'ZTF_alerts': {'ZTF18abacqpw': [{'objectId': 'ZTF18abacqpw'}]},
+        # 'PGIR_alerts': {'ZTF18abacqpw': []}}}}
+
+        assert "default" in response
+        data = response["default"].get("data")
+
+        # now the same but running them in parallel
+        response = k.query(queries=queries, use_batch_query=True)
+        assert "default" in response
+        data = response["default"][0].get("data")
+        assert len(data) > 0
+
+        # now we add a new instance and run the same queries (non parallel and parallel)
+        cfg = {
+            "token": token,
+            "protocol": "http",  # here we change the protocol
+            "host": "127.0.0.1",  # this is the trick we use to test the add() method running only one kowalski instance
+            "port": 4000,
+        }
+        k.add(name="test", cfg=cfg)
+
+        response = k.query(queries=queries, use_batch_query=False)
+        assert "default" in response
+        assert "test" in response
+        data = response["default"].get("data")
+        assert len(data) > 0
+        data = response["test"].get("data")
+        assert len(data) == 0
+
+        response = k.query(queries=queries, use_batch_query=True)
+        assert "default" in response
+        assert "test" in response
+        data = response["default"][0].get("data")
+        assert len(data) > 0
+        data = response["test"][0].get("data")
+        assert len(data) == 0
+
+    def test_query_cone_search_multiple_catalogs_multiple_instances(self):
+        token = self.kowalski.instances["default"]["token"]
+
+        k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
+
+        cfg = {
+            "token": token,
+            "protocol": "http",  # here we change the protocol
+            "host": "127.0.0.1",  # this is the trick we use to test the add() method running only one kowalski instance
+            "port": 4000,
+        }
+        k.add(name="test", cfg=cfg)
+
+        catalog_1 = "ZTF_alerts"
+        catalog_2 = "PGIR_alerts"
+        obj_id = "ZTF18abacqpw"
+
+        query = {
+            "query_type": "cone_search",
+            "query": {
+                "object_coordinates": {
+                    "cone_search_radius": 2,
+                    "cone_search_unit": "arcsec",
+                    "radec": {
+                        obj_id: [
+                            68.578209,
+                            49.0871395,
+                        ]
+                    },
+                },
+                "catalogs": {
+                    catalog_1: {"filter": {}, "projection": {"_id": 0, "objectId": 1}},
+                    catalog_2: {"filter": {}, "projection": {"_id": 0, "objectId": 1}},
+                },
+            },
+            "kwargs": {"filter_first": False},
+        }
+
+        response = k.query(query=query)
+
+        # the code splits the load between instances if catalogs are available in both, so we should get:
+        assert "default" in response
+        data_default = response["default"].get("data")
+        assert "test" in response
+        data_test = response["test"].get("data")
+        assert catalog_1 in data_default
+        assert catalog_2 in data_test
+        assert obj_id in data_default[catalog_1]
+        assert obj_id in data_test[catalog_2]
+        assert len(data_default[catalog_1][obj_id]) > 0
+        assert len(data_test[catalog_2][obj_id]) == 0
+
+        k.instances["default"][
+            "catalogs"
+        ] = (
+            []
+        )  # we make sure the first instance (default) does not have the catalog we are looking for,
+        # this is to test the fallback to the second instance
+
+        response = k.query(query=query)
+
+        assert "test" in response
+        data = response["test"].get("data")
+        assert catalog_1 in data
+        assert catalog_2 in data
+        assert obj_id in data[catalog_1]
+        assert obj_id in data[catalog_2]
+        assert len(data[catalog_1][obj_id]) > 0
+        assert len(data[catalog_2][obj_id]) == 0
+
+        assert "default" not in response
+
+        # now, we test what happens if one instance has the first catalog, but not the second one
+        # and the other instance has the second catalog, but not the first one
+        k.instances["default"]["catalogs"] = [catalog_1]
+        k.instances["test"]["catalogs"] = [catalog_2]
+
+        response = k.query(query=query)
+
+        assert "default" in response
+        data = response["default"].get("data")
+        assert catalog_1 in data
+        assert obj_id in data[catalog_1]
+        assert len(data[catalog_1][obj_id]) > 0
+
+        assert catalog_2 not in data
+
+        assert "test" in response
+        data = response["test"].get("data")
+        assert catalog_2 in data
+        assert obj_id in data[catalog_2]
+        assert len(data[catalog_2][obj_id]) == 0
+
+    def test_batch_query_cone_search_multiple_catalogs_multiple_instances(self):
+        token = self.kowalski.instances["default"]["token"]
+
+        k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
+
+        cfg = {
+            "token": token,
+            "protocol": "http",  # here we change the protocol
+            "host": "127.0.0.1",  # this is the trick we use to test the add() method running only one kowalski instance
+            "port": 4000,
+        }
+        k.add(name="test", cfg=cfg)
+
+        catalog_1 = "ZTF_alerts"
+        catalog_2 = "PGIR_alerts"
+        obj_id = "ZTF18abacqpw"
+
+        query = {
+            "query_type": "cone_search",
+            "query": {
+                "object_coordinates": {
+                    "cone_search_radius": 2,
+                    "cone_search_unit": "arcsec",
+                    "radec": {
+                        obj_id: [
+                            68.578209,
+                            49.0871395,
+                        ]
+                    },
+                },
+                "catalogs": {
+                    catalog_1: {"filter": {}, "projection": {"_id": 0, "objectId": 1}},
+                    catalog_2: {"filter": {}, "projection": {"_id": 0, "objectId": 1}},
+                },
+            },
+            "kwargs": {"filter_first": False},
+        }
+
+        response = k.query(query=query, use_batch_query=True)
+        assert "default" in response
+
+        data_default = response["default"][0].get("data")
+        assert "test" in response
+        data_test = response["test"][0].get("data")
+        assert catalog_1 in data_default
+        assert catalog_2 in data_test
+        assert obj_id in data_default[catalog_1]
+        assert obj_id in data_test[catalog_2]
+        assert len(data_default[catalog_1][obj_id]) > 0
+        assert len(data_test[catalog_2][obj_id]) == 0
+
     def test_query_find(self):
         catalog = "ZTF_alerts"
-        obj_id = "ZTF17aaaaaas"
+        obj_id = "ZTF18abacqpw"
 
         query = {
             "query_type": "find",
@@ -117,8 +323,8 @@ class TestPenquins:
         }
 
         response = self.kowalski.query(query=query)
-        assert "data" in response
-        data = response.get("data")
+        assert "default" in response
+        data = response["default"].get("data")
         assert len(data) > 0
         assert data[0]["objectId"] == obj_id
 
@@ -165,7 +371,7 @@ class TestPenquins:
         assert response["message"] == f"Removed filter id {filter_id}"
 
     def test_query_cone_search_from_skymap(self):
-        n_treads = 8
+        max_n_threads = 8
         filename = "localization.fits"
         path = os.path.join(os.path.dirname(__file__), "data", filename)
 
@@ -184,7 +390,7 @@ class TestPenquins:
             "candidate.isdiffpos": 1,
         }
 
-        candidates_in_skymap = self.kowalski.query_skymap(
+        candidates_in_skymap_per_instance = self.kowalski.query_skymap(
             path,
             cumprob,
             jd_start,
@@ -193,16 +399,185 @@ class TestPenquins:
             program_ids,
             filter_kwargs,
             projection_kwargs,
-            n_treads=n_treads,
+            max_n_threads=max_n_threads,
         )
 
-        assert len(candidates_in_skymap.keys()) > 0
+        assert len(candidates_in_skymap_per_instance.keys()) > 0
+        assert (
+            self.kowalski.instances.keys() == candidates_in_skymap_per_instance.keys()
+        )
         for catalog in catalogs:
-            assert catalog in candidates_in_skymap.keys()
-            assert len(candidates_in_skymap[catalog]) > 0
+            assert catalog in candidates_in_skymap_per_instance["default"].keys()
+            assert len(candidates_in_skymap_per_instance["default"][catalog]) > 0
             assert all(
                 [
                     "isdiffpos" in candidate["candidate"].keys()
-                    for candidate in candidates_in_skymap[catalog]
+                    for candidate in candidates_in_skymap_per_instance["default"][
+                        catalog
+                    ]
                 ]
             )
+
+    def test_cant_add_duplicate_instance(self):
+        token = self.kowalski.instances["default"]["token"]
+
+        k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
+        cfg = {
+            "token": token,
+            "protocol": "https",
+            "host": "localhost",
+            "port": 4000,
+        }
+        with pytest.raises(ValueError):
+            k.add(name="test", cfg=cfg)
+
+    def test_cant_add_instance_with_same_name(self):
+        token = self.kowalski.instances["default"]["token"]
+
+        k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
+        cfg = {
+            "token": token,
+            "protocol": "https",
+            "host": "localhost",
+            "port": 4000,
+        }
+        with pytest.raises(ValueError):
+            k.add(name="default", cfg=cfg)
+
+    def test_add_instance(self):
+        token = self.kowalski.instances["default"]["token"]
+
+        k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
+        cfg = {
+            "token": token,
+            "protocol": "http",
+            "host": "127.0.0.1",  # this is the trick we use to test the add() method running only one kowalski instance
+            "port": 4000,
+        }
+        k.add(name="test", cfg=cfg)
+
+    def test_get_catalogs(self):
+        catalogs = self.kowalski.get_catalogs()
+        assert len(catalogs) > 0
+        assert "ZTF_alerts" in catalogs
+
+    def test_get_catalogs_when_multiple_instances(self):
+        token = self.kowalski.instances["default"]["token"]
+
+        k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
+        cfg = {
+            "token": token,
+            "protocol": "http",  # here we change the protocol
+            "host": "127.0.0.1",  # this is the trick we use to test the add() method running only one kowalski instance
+            "port": 4000,
+        }
+        k.add(name="test", cfg=cfg)
+
+        # get catalogs for one instance
+        catalogs = k.get_catalogs(name="test")
+
+        assert len(catalogs) > 0
+        assert "ZTF_alerts" in catalogs
+
+        # get catalogs for all instances
+        catalogs = k.get_catalogs_all()
+        assert set(catalogs.keys()) == set(["default", "test"])
+        assert all([len(catalogs[name]) > 0 for name in catalogs.keys()])
+
+    def test_query_when_multiple_instances_with_name(self):
+        token = self.kowalski.instances["default"]["token"]
+
+        k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
+        cfg = {
+            "token": token,
+            "protocol": "http",  # here we change the protocol
+            "host": "127.0.0.1",  # this is the trick we use to test the add() method running only one kowalski instance
+            "port": 4000,
+        }
+        k.add(name="test", cfg=cfg)
+
+        catalog = "ZTF_alerts"
+
+        obj_id = "ZTF18abacqpw"
+
+        query = {
+            "query_type": "find",
+            "query": {
+                "catalog": catalog,
+                "filter": {"objectId": obj_id},
+                "projection": {"_id": 0, "objectId": 1},
+            },
+        }
+
+        response = k.query(query=query, name="test")
+        assert "test" in response
+        data = response["test"].get("data")
+        assert len(data) > 0
+        assert data[0]["objectId"] == obj_id
+
+    def test_query_when_multiple_instances_no_name(self):
+        token = self.kowalski.instances["default"]["token"]
+
+        k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
+
+        cfg = {
+            "token": token,
+            "protocol": "http",  # here we change the protocol
+            "host": "127.0.0.1",  # this is the trick we use to test the add() method running only one kowalski instance
+            "port": 4000,
+        }
+        k.add(name="test", cfg=cfg)
+        k.instances["default"][
+            "catalogs"
+        ] = (
+            []
+        )  # we make sure the first instance (default) does not have the catalog we are looking for,
+        # this is to test the fallback to the second instance
+
+        catalog = "ZTF_alerts"
+
+        query = {
+            "query_type": "find",
+            "query": {
+                "catalog": catalog,
+                "filter": {},
+                "projection": {"_id": 0, "objectId": 1},
+            },
+            "kwargs": {
+                "max_time_ms": 10000,
+            },
+        }
+
+        q = k.query(query)
+        assert "test" in q
+        assert "data" in q["test"]
+        assert len(q["test"]["data"]) > 0
+        assert (
+            len(list(q["test"]["data"][0].keys())) == 1
+        )  # we verify that the projection worked
+        assert "objectId" in q["test"]["data"][0].keys()
+
+    def test_catalogsless_query(self):
+        """Here we want to test a query that is not on catalogs but on the database itself"""
+        token = self.kowalski.instances["default"]["token"]
+
+        k = Kowalski(token=token, protocol="http", host="localhost", port=4000)
+
+        query = {"query_type": "info", "query": {"command": "catalog_names"}}
+        response = k.query(query=query)
+
+        assert "default" in response
+        assert "data" in response["default"]
+        assert "ZTF_alerts" in response["default"]["data"]
+
+        # now we should raise an error for those, as queries that dont specify catalogs should specify on which instance to run
+        cfg = {
+            "token": token,
+            "protocol": "http",  # here we change the protocol
+            "host": "127.0.0.1",  # this is the trick we use to test the add() method running only one kowalski instance
+            "port": 4000,
+        }
+        k.add(name="test", cfg=cfg)
+
+        with pytest.raises(ValueError):
+            k.query(query=query)

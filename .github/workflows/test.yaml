@@ -18,7 +18,7 @@ jobs:
       - name: Fetch and set up Kowalski
         uses: actions/checkout@v2
         with:
-          repository: dmitryduev/kowalski
+          repository: skyportal/kowalski
           path: kowalski
       - name: Configure and spin up Kowalski, ingest test data
         run: |
