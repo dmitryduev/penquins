@@ -23,11 +23,9 @@ from requests.adapters import DEFAULT_POOLBLOCK, DEFAULT_POOLSIZE, HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 from tqdm.auto import tqdm
 
-__version__ = "2.2.0"
-
+__version__ = "3.0.0"
 
 Num = Union[int, float]
-
 
 DEFAULT_TIMEOUT: int = 5  # seconds
 DEFAULT_RETRIES: int = 3
@@ -257,13 +255,17 @@ class Kowalski:
             raise ValueError(f"Instance {name} does not exist")
         del self.instances[name]
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        # run shut down procedure
-        self.close_all()
-        return False
+    def rename(self, name, old_name=None):
+        """Rename an instance"""
+        if old_name is None:
+            if not self.multiple_instances:
+                old_name = list(self.instances.keys())[0]
+            else:
+                raise ValueError(
+                    "Please specify instance name when using multiple instances"
+                )
+        self.instances[name] = self.instances[old_name]
+        del self.instances[old_name]
 
     def close_all(self):
         """Shutdown session(s) gracefully
@@ -303,6 +305,14 @@ class Kowalski:
             if self.v:
                 print(e)
             return False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        # run shut down procedure
+        self.close_all()
+        return False
 
     def authenticate(self, name=None):
         """Authenticate user, return access token
@@ -345,6 +355,35 @@ class Kowalski:
 
         raise Exception(f"Authentication failed for {name}: {str(auth.json())}")
 
+    def ping(self, name=None) -> bool:
+        """Ping Kowalski
+
+        :return: True if connection is ok, False otherwise
+        """
+        if name is None:
+            if not self.multiple_instances:
+                name = list(self.instances.keys())[0]
+            else:
+                raise ValueError(
+                    "Please specify instance name when using multiple instances"
+                )
+        try:
+            resp = self.instances[name]["session"].get(
+                os.path.join(self.instances[name]["base_url"], ""),
+                headers=self.instances[name]["headers"],
+            )
+
+            if resp.status_code == requests.codes.ok:
+                return True
+            return False
+
+        except Exception as _e:
+            _err = traceback.format_exc()
+            if self.v:
+                print(_e)
+                print(_err)
+            return False
+
     def api(
         self, method: str, endpoint: str, data: Optional[Mapping] = None, name=None
     ):
@@ -380,307 +419,6 @@ class Kowalski:
             )
 
         return loads(resp.text)
-
-    def batch_query(self, queries: Sequence[Mapping], n_threads: int = 4):
-        """Call Kowalski's /api/queries endpoint using multiple processes
-
-        :param queries: sequence of queries
-        :param n_threads: number of processes to use
-        :return:
-        """
-        # we want to reformat it to a list of tuples, where the first element is the query, and the second is the instance name
-
-        queries_name_tpl = []
-        for name, queries in queries.items():
-            for query in queries:
-                queries_name_tpl.append((query, name))
-
-        min_threads = max(1, len(queries_name_tpl))
-        n_threads = min(min_threads, n_threads)
-
-        # if running some tests, you might want to uncomment this to make sure you are using the correct number of threads
-        # print(f"Split the {len(queries)} queries dict (instance: queries) into {len(queries_name_tpl)} queries tuple (instance, query)")
-        # print(f"Running {len(queries_name_tpl)} queries on {n_threads} threads")
-        with ThreadPool(processes=n_threads) as pool:
-            if self.v:
-                return list(
-                    tqdm(
-                        pool.imap(
-                            self.single_query,
-                            queries_name_tpl,
-                            # chunksize=len(queries_name_tpl),
-                        )
-                    )
-                )
-            # return list(pool.imap(
-            #     self.single_query, queries_name_tpl, chunksize=len(queries_name_tpl)
-            # ))
-            return list(pool.imap(self.single_query, queries_name_tpl))
-
-    def single_query(self, query_tpl: Tuple[Mapping, str]):
-        """Call Kowalski's /api/queries endpoint using multiple processes
-
-        :param query: query mapping
-        :return:
-        """
-        query, name = query_tpl
-        _query = deepcopy(query)
-
-        # by default, all queries are not registered in the db and the task/results are stored on disk as json files
-        # giving a significant execution speed up. this behaviour can be overridden.
-        save = _query.get("kwargs", dict()).get("save", False)
-
-        if save:
-            if "kwargs" not in _query:
-                _query["kwargs"] = dict()
-            if "_id" not in _query["kwargs"]:
-                # generate a unique hash id and store it in query if saving query in db on Kowalski is requested
-                _id = "".join(
-                    secrets.choice(string.ascii_lowercase + string.digits)
-                    for _ in range(32)
-                )
-
-                _query["kwargs"]["_id"] = _id
-
-        resp = self.instances[name]["session"].post(
-            os.path.join(self.instances[name]["base_url"], "api/queries"),
-            json=_query,
-            headers=self.instances[name]["headers"],
-        )
-        return {name: loads(resp.text)}
-
-    def query(
-        self,
-        query=None,
-        queries: list = None,
-        name=None,
-        use_batch_query: bool = False,
-        max_n_threads: int = 4,
-    ):
-        """Call Kowalski's /api/queries endpoint using multiple processes
-
-        :param query: query mapping
-        :return:
-        """
-        if query is None and queries is None:
-            raise ValueError("Please specify query or queries")
-        if query is not None and queries is not None:
-            raise ValueError("Please specify either query or queries, not both")
-        if query is not None:
-            query_split_in_queries, _ = self.prepare_query(query, name=name)
-
-            if name is not None:
-                return self.single_query((query_split_in_queries[name], name))
-
-            if len(query_split_in_queries) == 1:
-                return self.single_query(
-                    (
-                        query_split_in_queries[list(query_split_in_queries.keys())[0]],
-                        list(query_split_in_queries.keys())[0],
-                    )
-                )
-
-            if use_batch_query:
-                if len(query_split_in_queries) == 0:
-                    raise ValueError(
-                        f"No valid query found in {str(query)}\n which yielded {str(query_split_in_queries)}"
-                    )
-                # this return a dict of instance and one query, but we want a dict of instance and a list of queries for batch_query
-                query_split_in_queries = {
-                    name: [query] for name, query in query_split_in_queries.items()
-                }
-                # the n_threads parameter is the number of instances, maxed at max_n_threads
-                results = self.batch_query(
-                    query_split_in_queries, n_threads=max_n_threads
-                )
-                # the results are a list of dicts, we want a single dict with the instance name as key and the list of the queries for that instance as value
-                final_results = {
-                    name: [result[name] for result in results if name in result]
-                    for name in query_split_in_queries.keys()
-                }
-                return final_results
-
-            else:
-                results = {}
-                for name, query in query_split_in_queries.items():
-                    if query is not None:
-                        results.update(self.single_query((query, name)))
-                return results
-
-        if queries is not None:
-            queries_split_in_queries = self.prepare_queries(queries)
-            if len(queries_split_in_queries) == 0:
-                raise ValueError(
-                    f"No valid queries found in {str(queries)}\n which yielded {str(queries_split_in_queries)}"
-                )
-            if use_batch_query:
-                # the n_threads parameter is the number of instances, maxed at max_n_threads
-                results = self.batch_query(
-                    queries_split_in_queries, n_threads=max_n_threads
-                )
-                # the results are a list of dicts, we want a single dict with the instance name as key and the list of the queries for that instance as value
-                final_results = {
-                    name: [result[name] for result in results if name in result]
-                    for name in queries_split_in_queries.keys()
-                }
-                return final_results
-            else:
-                results = {}
-                for name in queries_split_in_queries.keys():
-                    for query in queries_split_in_queries[name]:
-                        if query is not None:
-                            results.update(self.single_query((query, name)))
-                return results
-
-    def ping(self, name=None) -> bool:
-        """Ping Kowalski
-
-        :return: True if connection is ok, False otherwise
-        """
-        if name is None:
-            if not self.multiple_instances:
-                name = list(self.instances.keys())[0]
-            else:
-                raise ValueError(
-                    "Please specify instance name when using multiple instances"
-                )
-        try:
-            resp = self.instances[name]["session"].get(
-                os.path.join(self.instances[name]["base_url"], ""),
-                headers=self.instances[name]["headers"],
-            )
-
-            if resp.status_code == requests.codes.ok:
-                return True
-            return False
-
-        except Exception as _e:
-            _err = traceback.format_exc()
-            if self.v:
-                print(_e)
-                print(_err)
-            return False
-
-    def query_skymap(
-        self,
-        path: Path,  # path or file-like object
-        cumprob: float,
-        jd_start: float,
-        jd_end: float,
-        catalogs: List[str],
-        program_ids: List[int],
-        filter_kwargs: Optional[Mapping] = dict(),
-        projection_kwargs: Optional[Mapping] = dict(),
-        max_n_threads: int = 4,
-    ) -> List[dict]:
-        missing_args = [
-            arg
-            for arg in [
-                path,
-                cumprob,
-                jd_start,
-                jd_end,
-                catalogs,
-                program_ids,
-            ]
-            if arg is None
-        ]
-        if len(missing_args) > 0:
-            raise ValueError(f"Missing arguments: {missing_args}")
-
-        cones = get_cones(path, cumprob)
-
-        if isinstance(projection_kwargs, dict):
-            if projection_kwargs.get("candid", 1) == 0:
-                raise ValueError(
-                    "candid cannot be excluded from projection. Do not set it to 0."
-                )
-
-        filter = {
-            "candidate.jd": {"$gt": jd_start, "$lt": jd_end},
-            "candidate.jdstarthist": {
-                "$gt": jd_start,
-                "$lt": jd_end,
-            },
-            "candidate.jdendhist": {
-                "$gt": jd_start,
-                "$lt": jd_end,
-            },
-            "candidate.programid": {
-                "$in": program_ids
-            },  # 1 = ZTF Public, 2 = ZTF Public+Partnership, 3 = ZTF Public+Partnership+Caltech
-        }
-
-        for k in filter_kwargs.keys():
-            filter[k] = filter_kwargs[k]
-
-        projection = {
-            "_id": 0,
-            "candid": 1,
-            "objectId": 1,
-            "candidate.ra": 1,
-            "candidate.dec": 1,
-            "candidate.jd": 1,
-            "candidate.jdendhist": 1,
-            "candidate.magpsf": 1,
-            "candidate.sigmapsf": 1,
-        }
-
-        for k in projection_kwargs.keys():
-            projection[k] = projection_kwargs[k]
-
-        queries = []
-        for cone in cones:
-            query = {
-                "query_type": "cone_search",
-                "query": {
-                    "object_coordinates": {
-                        "cone_search_radius": cone[2],
-                        "cone_search_unit": "deg",
-                        "radec": {"object": [cone[0], cone[1]]},
-                    },
-                    "catalogs": {
-                        catalog: {
-                            "filter": filter,
-                            "projection": projection,
-                        }
-                        for catalog in catalogs
-                    },
-                },
-            }
-
-            queries.append(query)
-
-        response = self.query(
-            queries=queries, use_batch_query=True, max_n_threads=max_n_threads
-        )
-
-        candidates_per_catalogs_per_instance = {
-            name: {catalog: [] for catalog in self.instances[name]["catalogs"]}
-            for name in list(self.instances.keys())
-        }
-
-        # first we have on response per query. Each response contains a dict with one key per instance
-        for name in list(response.keys()):
-            for response in response[name]:
-                data = response.get("data", None)
-                if data is None:
-                    continue
-                for catalog in catalogs:
-                    candidates_per_catalogs_per_instance[name][catalog].extend(
-                        data[catalog]["object"]
-                    )
-
-        for name in candidates_per_catalogs_per_instance.keys():  # remove duplicates
-            for catalog in candidates_per_catalogs_per_instance[name].keys():
-                candidates_per_catalogs_per_instance[name][catalog] = list(
-                    {
-                        c["candid"]: c
-                        for c in candidates_per_catalogs_per_instance[name][catalog]
-                    }.values()
-                )
-
-        return candidates_per_catalogs_per_instance
 
     def get_catalogs(self, name=None) -> dict:
         if name is None:
@@ -718,7 +456,7 @@ class Kowalski:
 
     def prepare_query(self, query, name=None, instances_load=None) -> dict:
         """Based on the catalogs or catalog specified in the query, split the query into multiple queries for each instance"""
-        # we will return a dict of instances and their queries
+
         if "catalogs" not in query["query"] and "catalog" not in query["query"]:
             if name is None and not self.multiple_instances:
                 name = list(self.instances.keys())[0]
@@ -855,7 +593,6 @@ class Kowalski:
 
     def prepare_queries(self, queries, name=None) -> dict:
         """Based on the catalogs or catalog specified in the queries, split the queries into multiple queries for each instance"""
-        # we will return a dict of instances and their queries
         queries_per_instance = {name: [] for name in self.instances.keys()}
         instances_load = {name: 0 for name in self.instances.keys()}
         for query in queries:
@@ -869,14 +606,266 @@ class Kowalski:
 
         return queries_per_instance
 
-    def rename(self, name, old_name=None):
-        """Rename an instance"""
-        if old_name is None:
-            if not self.multiple_instances:
-                old_name = list(self.instances.keys())[0]
-            else:
-                raise ValueError(
-                    "Please specify instance name when using multiple instances"
+    def batch_query(self, queries: Sequence[Mapping], n_threads: int = 4):
+        """Call Kowalski's /api/queries endpoint using multiple processes
+
+        :param queries: sequence of queries
+        :param n_threads: number of processes to use
+        :return:
+        """
+        queries_name_tpl = []
+        for name, queries in queries.items():
+            for query in queries:
+                queries_name_tpl.append((query, name))
+
+        min_threads = max(1, len(queries_name_tpl))
+        n_threads = min(min_threads, n_threads)
+
+        with ThreadPool(processes=n_threads) as pool:
+            if self.v:
+                return list(
+                    tqdm(
+                        pool.imap(
+                            self.single_query,
+                            queries_name_tpl,
+                            # chunksize=len(queries_name_tpl),
+                        )
+                    )
                 )
-        self.instances[name] = self.instances[old_name]
-        del self.instances[old_name]
+            return list(pool.imap(self.single_query, queries_name_tpl))
+
+    def single_query(self, query_tpl: Tuple[Mapping, str]):
+        """Call Kowalski's /api/queries endpoint using multiple processes
+
+        :param query: query mapping
+        :return:
+        """
+        query, name = query_tpl
+        _query = deepcopy(query)
+
+        # by default, all queries are not registered in the db and the task/results are stored on disk as json files
+        # giving a significant execution speed up. this behaviour can be overridden.
+        save = _query.get("kwargs", dict()).get("save", False)
+
+        if save:
+            if "kwargs" not in _query:
+                _query["kwargs"] = dict()
+            if "_id" not in _query["kwargs"]:
+                # generate a unique hash id and store it in query if saving query in db on Kowalski is requested
+                _id = "".join(
+                    secrets.choice(string.ascii_lowercase + string.digits)
+                    for _ in range(32)
+                )
+
+                _query["kwargs"]["_id"] = _id
+
+        resp = self.instances[name]["session"].post(
+            os.path.join(self.instances[name]["base_url"], "api/queries"),
+            json=_query,
+            headers=self.instances[name]["headers"],
+        )
+        return {name: loads(resp.text)}
+
+    def query(
+        self,
+        query=None,
+        queries: list = None,
+        name=None,
+        use_batch_query: bool = False,
+        max_n_threads: int = 4,
+    ):
+        """Call Kowalski's /api/queries endpoint using multiple processes
+
+        :param query: query mapping
+        :return:
+        """
+        if query is None and queries is None:
+            raise ValueError("Please specify query or queries")
+        if query is not None and queries is not None:
+            raise ValueError("Please specify either query or queries, not both")
+        if query is not None:
+            query_split_in_queries, _ = self.prepare_query(query, name=name)
+
+            if name is not None:
+                return self.single_query((query_split_in_queries[name], name))
+
+            if len(query_split_in_queries) == 1:
+                return self.single_query(
+                    (
+                        query_split_in_queries[list(query_split_in_queries.keys())[0]],
+                        list(query_split_in_queries.keys())[0],
+                    )
+                )
+
+            if use_batch_query:
+                if len(query_split_in_queries) == 0:
+                    raise ValueError(
+                        f"No valid query found in {str(query)}\n which yielded {str(query_split_in_queries)}"
+                    )
+                # this return a dict of instance and one query, but we want a dict of instance and a list of queries for batch_query
+                query_split_in_queries = {
+                    name: [query] for name, query in query_split_in_queries.items()
+                }
+                # the n_threads parameter is the number of instances, maxed at max_n_threads
+                results = self.batch_query(
+                    query_split_in_queries, n_threads=max_n_threads
+                )
+                # the results are a list of dicts, we want a single dict with the instance name as key and the list of the queries for that instance as value
+                final_results = {
+                    name: [result[name] for result in results if name in result]
+                    for name in query_split_in_queries.keys()
+                }
+                return final_results
+
+            else:
+                results = {}
+                for name, query in query_split_in_queries.items():
+                    if query is not None:
+                        results.update(self.single_query((query, name)))
+                return results
+
+        if queries is not None:
+            queries_split_in_queries = self.prepare_queries(queries)
+            if len(queries_split_in_queries) == 0:
+                raise ValueError(
+                    f"No valid queries found in {str(queries)}\n which yielded {str(queries_split_in_queries)}"
+                )
+            if use_batch_query:
+                # the n_threads parameter is the number of instances, maxed at max_n_threads
+                results = self.batch_query(
+                    queries_split_in_queries, n_threads=max_n_threads
+                )
+                # the results are a list of dicts, we want a single dict with the instance name as key and the list of the queries for that instance as value
+                final_results = {
+                    name: [result[name] for result in results if name in result]
+                    for name in queries_split_in_queries.keys()
+                }
+                return final_results
+            else:
+                results = {}
+                for name in queries_split_in_queries.keys():
+                    for query in queries_split_in_queries[name]:
+                        if query is not None:
+                            results.update(self.single_query((query, name)))
+                return results
+
+    def query_skymap(
+        self,
+        path: Path,  # path or file-like object
+        cumprob: float,
+        jd_start: float,
+        jd_end: float,
+        catalogs: List[str],
+        program_ids: List[int],
+        filter_kwargs: Optional[Mapping] = dict(),
+        projection_kwargs: Optional[Mapping] = dict(),
+        max_n_threads: int = 4,
+    ) -> List[dict]:
+        missing_args = [
+            arg
+            for arg in [
+                path,
+                cumprob,
+                jd_start,
+                jd_end,
+                catalogs,
+                program_ids,
+            ]
+            if arg is None
+        ]
+        if len(missing_args) > 0:
+            raise ValueError(f"Missing arguments: {missing_args}")
+
+        cones = get_cones(path, cumprob)
+
+        if isinstance(projection_kwargs, dict):
+            if projection_kwargs.get("candid", 1) == 0:
+                raise ValueError(
+                    "candid cannot be excluded from projection. Do not set it to 0."
+                )
+
+        filter = {
+            "candidate.jd": {"$gt": jd_start, "$lt": jd_end},
+            "candidate.jdstarthist": {
+                "$gt": jd_start,
+                "$lt": jd_end,
+            },
+            "candidate.jdendhist": {
+                "$gt": jd_start,
+                "$lt": jd_end,
+            },
+            "candidate.programid": {
+                "$in": program_ids
+            },  # 1 = ZTF Public, 2 = ZTF Public+Partnership, 3 = ZTF Public+Partnership+Caltech
+        }
+
+        for k in filter_kwargs.keys():
+            filter[k] = filter_kwargs[k]
+
+        projection = {
+            "_id": 0,
+            "candid": 1,
+            "objectId": 1,
+            "candidate.ra": 1,
+            "candidate.dec": 1,
+            "candidate.jd": 1,
+            "candidate.jdendhist": 1,
+            "candidate.magpsf": 1,
+            "candidate.sigmapsf": 1,
+        }
+
+        for k in projection_kwargs.keys():
+            projection[k] = projection_kwargs[k]
+
+        queries = []
+        for cone in cones:
+            query = {
+                "query_type": "cone_search",
+                "query": {
+                    "object_coordinates": {
+                        "cone_search_radius": cone[2],
+                        "cone_search_unit": "deg",
+                        "radec": {"object": [cone[0], cone[1]]},
+                    },
+                    "catalogs": {
+                        catalog: {
+                            "filter": filter,
+                            "projection": projection,
+                        }
+                        for catalog in catalogs
+                    },
+                },
+            }
+
+            queries.append(query)
+
+        response = self.query(
+            queries=queries, use_batch_query=True, max_n_threads=max_n_threads
+        )
+
+        candidates_per_catalogs_per_instance = {
+            name: {catalog: [] for catalog in self.instances[name]["catalogs"]}
+            for name in list(self.instances.keys())
+        }
+
+        # first we have on response per query. Each response contains a dict with one key per instance
+        for name in list(response.keys()):
+            for response in response[name]:
+                data = response.get("data", None)
+                if data is None:
+                    continue
+                for catalog in catalogs:
+                    candidates_per_catalogs_per_instance[name][catalog].extend(
+                        data[catalog]["object"]
+                    )
+
+        for name in candidates_per_catalogs_per_instance.keys():  # remove duplicates
+            for catalog in candidates_per_catalogs_per_instance[name].keys():
+                candidates_per_catalogs_per_instance[name][catalog] = list(
+                    {
+                        c["candid"]: c
+                        for c in candidates_per_catalogs_per_instance[name][catalog]
+                    }.values()
+                )
+
+        return candidates_per_catalogs_per_instance
