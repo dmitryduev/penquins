@@ -378,6 +378,8 @@ class TestPenquins:
         cumprob = 0.7
         jd_start = Time("2019-01-01").jd
         jd_end = Time("2020-01-02").jd
+        jdstarthist_start = jd_start
+        jdstarthist_end = jd_end
         catalogs = ["ZTF_alerts"]
         program_ids = [1]
 
@@ -395,6 +397,8 @@ class TestPenquins:
             cumprob,
             jd_start,
             jd_end,
+            jdstarthist_start,
+            jdstarthist_end,
             catalogs,
             program_ids,
             filter_kwargs,
