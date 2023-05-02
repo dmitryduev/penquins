@@ -24,12 +24,9 @@ jobs:
         run: |
           cd kowalski
           python -m pip install --upgrade pip
-          pip install wheel==0.36.0
-          pip install -r requirements.txt
-          cp config.defaults.yaml config.yaml
           cp docker-compose.defaults.yaml docker-compose.yaml
-          ./kowalski.py up --build
-          ./kowalski.py test
+          make docker_build && make docker_up
+          make docker_test
       - name: Install penquins
         run: |
           python setup.py install

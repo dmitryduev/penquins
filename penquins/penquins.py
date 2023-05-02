@@ -755,12 +755,32 @@ class Kowalski:
         cumprob: float,
         jd_start: float,
         jd_end: float,
+        jdstarthist_start: float,
+        jdstarthist_end: float,
         catalogs: List[str],
         program_ids: List[int],
         filter_kwargs: Optional[Mapping] = dict(),
         projection_kwargs: Optional[Mapping] = dict(),
         max_n_threads: int = 4,
     ) -> List[dict]:
+        """
+        Query Kowalski for objects in a skymap
+
+        :param path: path to skymap file
+        :param cumprob: cumulative probability threshold
+        :param jd_start: Query candidates detected after this JD
+        :param jd_end: Query candidates detected before this JD
+        :param jdstarthist_start: Query candidates first detected after this JD
+        (i.e. with jdstarthist > jdstarthist_start). This is to ensure sub-threshold
+        detections that sometimes show up in jdstarthist are also retrieved.
+        :param jdstarthist_end: Query candidates first detected before this JD
+        (i.e. with jdstarthist < jdstarthist_end)
+        :param catalogs: List of catalogs to query
+        :param program_ids: List of program IDs to query
+        :param filter_kwargs: Additional filter kwargs
+        :param projection_kwargs: Additional projection kwargs
+        :param max_n_threads: Maximum number of threads to use
+        """
         missing_args = [
             arg
             for arg in [
@@ -787,12 +807,8 @@ class Kowalski:
         filter = {
             "candidate.jd": {"$gt": jd_start, "$lt": jd_end},
             "candidate.jdstarthist": {
-                "$gt": jd_start,
-                "$lt": jd_end,
-            },
-            "candidate.jdendhist": {
-                "$gt": jd_start,
-                "$lt": jd_end,
+                "$gt": jdstarthist_start,
+                "$lt": jdstarthist_end,
             },
             "candidate.programid": {
                 "$in": program_ids
