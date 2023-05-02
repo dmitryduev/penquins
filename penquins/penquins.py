@@ -750,18 +750,18 @@ class Kowalski:
                 return results
 
     def query_skymap(
-            self,
-            path: Path,  # path or file-like object
-            cumprob: float,
-            jd_start: float,
-            jd_end: float,
-            jdstarthist_start: float,
-            jdstarthist_end: float,
-            catalogs: List[str],
-            program_ids: List[int],
-            filter_kwargs: Optional[Mapping] = dict(),
-            projection_kwargs: Optional[Mapping] = dict(),
-            max_n_threads: int = 4,
+        self,
+        path: Path,  # path or file-like object
+        cumprob: float,
+        jd_start: float,
+        jd_end: float,
+        jdstarthist_start: float,
+        jdstarthist_end: float,
+        catalogs: List[str],
+        program_ids: List[int],
+        filter_kwargs: Optional[Mapping] = dict(),
+        projection_kwargs: Optional[Mapping] = dict(),
+        max_n_threads: int = 4,
     ) -> List[dict]:
         """
         Query Kowalski for objects in a skymap
