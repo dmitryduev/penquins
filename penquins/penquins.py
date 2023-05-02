@@ -813,8 +813,7 @@ class Kowalski:
             "candidate.programid": {
                 "$in": program_ids
             },
-            # 1 = ZTF Public, 2 = ZTF Public+Partnership, 3 = ZTF Public+Partnership
-            # +Caltech
+            # 1 = ZTF Public, 2 = ZTF Public+Partnership, 3 = ZTF Public+Partnership+Caltech
         }
 
         for k in filter_kwargs.keys():
