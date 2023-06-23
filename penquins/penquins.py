@@ -230,7 +230,7 @@ class Kowalski:
             if cfg.get("token", None) is None:
                 self.instances[name]["username"] = cfg.get("username", None)
                 self.instances[name]["password"] = cfg.get("password", None)
-                self.instances[name]["token"] = self.authenticate()
+                self.instances[name]["token"] = self.authenticate(name)
             else:
                 self.instances[name]["token"] = cfg.get("token", None)
 
