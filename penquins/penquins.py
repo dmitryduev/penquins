@@ -23,7 +23,7 @@ from requests.adapters import DEFAULT_POOLBLOCK, DEFAULT_POOLSIZE, HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 from tqdm.auto import tqdm
 
-__version__ = "2.3.1"
+__version__ = "2.3.2"
 
 Num = Union[int, float]
 
