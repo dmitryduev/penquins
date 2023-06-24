@@ -149,10 +149,6 @@ setup(
     description=DESCRIPTION,
     packages=["penquins"],
     install_requires=[
-        "astropy>=5.2.1",
-        "astropy-healpix>=0.7",
-        "healpy>=1.16.0",
-        "mocpy>=0.11.0",
         "pymongo>=3.10.1",
         "pytest>=5.3.1",
         "requests>=2.25.0",
