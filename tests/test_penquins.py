@@ -577,3 +577,26 @@ class TestPenquins:
         assert "default" in response
         assert "data" in response["default"]
         assert len(response["default"]["data"]) == 20
+
+        query = {
+            "query_type": "skymap",
+            "query": {
+                "skymap": {
+                    "localization_name": "90.00000_30.00000_10.00000",
+                    "dateobs": "2023-06-23T15:42:26",
+                    "contour": 20,
+                },
+                "catalog": catalog,
+                "filter": {},
+                "projection": {"_id": 0, "objectId": 1},
+            },
+        }
+        response = self.kowalski.query(query=query)
+        assert "default" in response
+        assert "status" in response["default"]
+        assert response["default"]["status"] == "error"
+        assert "message" in response["default"]
+        assert (
+            response["default"]["message"]
+            == "ValueError: Contour level 20 not found in skymap"
+        )
