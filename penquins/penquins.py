@@ -31,6 +31,7 @@ query_type_one_catalog = [
     "schemas",
     "count_documents",
     "estimated_document_count",
+    "skymap",
 ]
 query_type_multiple_catalogs = ["cone_search", "near"]
 
