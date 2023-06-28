@@ -28,10 +28,10 @@ DEFAULT_BACKOFF_FACTOR: int = 1
 query_type_one_catalog = [
     "find_one",
     "find",
+    "skymap",
     "schemas",
     "count_documents",
     "estimated_document_count",
-    "skymap",
 ]
 query_type_multiple_catalogs = ["cone_search", "near"]
 
