@@ -9,21 +9,15 @@ import traceback
 from copy import deepcopy
 from multiprocessing.pool import ThreadPool
 from netrc import netrc
-from pathlib import Path
-from typing import List, Mapping, Optional, Sequence, Union, Tuple
+from typing import Mapping, Optional, Sequence, Union, Tuple
 
-import astropy.units as u
-import astropy_healpix as ah
-import healpy as hp
 import requests
-from astropy.io import fits
 from bson.json_util import loads
-from mocpy import MOC
 from requests.adapters import DEFAULT_POOLBLOCK, DEFAULT_POOLSIZE, HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 from tqdm.auto import tqdm
 
-__version__ = "2.3.1"
+__version__ = "2.3.2"
 
 Num = Union[int, float]
 
@@ -34,36 +28,12 @@ DEFAULT_BACKOFF_FACTOR: int = 1
 query_type_one_catalog = [
     "find_one",
     "find",
+    "skymap",
     "schemas",
     "count_documents",
     "estimated_document_count",
 ]
 query_type_multiple_catalogs = ["cone_search", "near"]
-
-
-def get_cones(path, cumprob):  # path or file-like object
-    max_order = None
-    with fits.open(path) as hdul:
-        hdul[1].columns
-        data = hdul[1].data
-        max_order = hdul[1].header["MOCORDER"]
-
-    uniq = data["UNIQ"]
-    probdensity = data["PROBDENSITY"]
-
-    level, _ = ah.uniq_to_level_ipix(uniq)
-    area = ah.nside_to_pixel_area(ah.level_to_nside(level)).to_value(u.steradian)
-    prob = probdensity * area
-
-    moc = MOC.from_valued_healpix_cells(uniq, prob, max_order, cumul_to=cumprob)
-    moc_json = moc.serialize(format="json")
-    cones = []
-    for order, values in moc_json.items():
-        for value in values:
-            ra, dec = hp.pix2ang(2 ** int(order), int(value), lonlat=True, nest=True)
-            r = hp.max_pixrad(2 ** int(order), degrees=True)
-            cones.append([ra, dec, r])
-    return cones
 
 
 class TimeoutHTTPAdapter(HTTPAdapter):
@@ -201,6 +171,7 @@ class Kowalski:
                 "put": self.instances[name]["session"].put,
                 "patch": self.instances[name]["session"].patch,
                 "delete": self.instances[name]["session"].delete,
+                "head": self.instances[name]["session"].head,
             }
             # mount session adapters
             timeout = kwargs.get("timeout", DEFAULT_TIMEOUT)
@@ -402,7 +373,7 @@ class Kowalski:
 
         if endpoint is None:
             raise ValueError("Endpoint not specified")
-        if method not in ["get", "post", "put", "patch", "delete"]:
+        if method not in ["get", "post", "put", "patch", "delete", "head"]:
             raise ValueError(f"Unsupported method: {method}")
 
         if method != "get":
@@ -418,7 +389,20 @@ class Kowalski:
                 headers=self.instances[name]["headers"],
             )
 
-        return loads(resp.text)
+        status_mapper = {
+            200: "success",
+            400: "error",
+        }
+        content = {}
+        try:
+            content = loads(resp.text)
+        except Exception:
+            content = {
+                "status": status_mapper.get(resp.status_code, "unknown"),
+                "message": resp.text,
+            }
+
+        return content
 
     def get_catalogs(self, name=None) -> dict:
         if name is None:
@@ -748,140 +732,3 @@ class Kowalski:
                         if query is not None:
                             results.update(self.single_query((query, name)))
                 return results
-
-    def query_skymap(
-        self,
-        path: Path,  # path or file-like object
-        cumprob: float,
-        jd_start: float,
-        jd_end: float,
-        jdstarthist_start: float,
-        jdstarthist_end: float,
-        catalogs: List[str],
-        program_ids: List[int],
-        filter_kwargs: Optional[Mapping] = dict(),
-        projection_kwargs: Optional[Mapping] = dict(),
-        max_n_threads: int = 4,
-    ) -> List[dict]:
-        """
-        Query Kowalski for objects in a skymap
-
-        :param path: path to skymap file
-        :param cumprob: cumulative probability threshold
-        :param jd_start: Query candidates detected after this JD
-        :param jd_end: Query candidates detected before this JD
-        :param jdstarthist_start: Query candidates first detected after this JD
-        (i.e. with jdstarthist > jdstarthist_start). This is to ensure sub-threshold
-        detections that sometimes show up in jdstarthist are also retrieved.
-        :param jdstarthist_end: Query candidates first detected before this JD
-        (i.e. with jdstarthist < jdstarthist_end)
-        :param catalogs: List of catalogs to query
-        :param program_ids: List of program IDs to query
-        :param filter_kwargs: Additional filter kwargs
-        :param projection_kwargs: Additional projection kwargs
-        :param max_n_threads: Maximum number of threads to use
-        """
-        missing_args = [
-            arg
-            for arg in [
-                path,
-                cumprob,
-                jd_start,
-                jd_end,
-                catalogs,
-                program_ids,
-            ]
-            if arg is None
-        ]
-        if len(missing_args) > 0:
-            raise ValueError(f"Missing arguments: {missing_args}")
-
-        cones = get_cones(path, cumprob)
-
-        if isinstance(projection_kwargs, dict):
-            if projection_kwargs.get("candid", 1) == 0:
-                raise ValueError(
-                    "candid cannot be excluded from projection. Do not set it to 0."
-                )
-
-        filter = {
-            "candidate.jd": {"$gt": jd_start, "$lt": jd_end},
-            "candidate.jdstarthist": {
-                "$gt": jdstarthist_start,
-                "$lt": jdstarthist_end,
-            },
-            "candidate.programid": {
-                "$in": program_ids
-            },  # 1 = ZTF Public, 2 = ZTF Public+Partnership, 3 = ZTF Public+Partnership+Caltech
-        }
-
-        for k in filter_kwargs.keys():
-            filter[k] = filter_kwargs[k]
-
-        projection = {
-            "_id": 0,
-            "candid": 1,
-            "objectId": 1,
-            "candidate.ra": 1,
-            "candidate.dec": 1,
-            "candidate.jd": 1,
-            "candidate.jdendhist": 1,
-            "candidate.magpsf": 1,
-            "candidate.sigmapsf": 1,
-        }
-
-        for k in projection_kwargs.keys():
-            projection[k] = projection_kwargs[k]
-
-        queries = []
-        for cone in cones:
-            query = {
-                "query_type": "cone_search",
-                "query": {
-                    "object_coordinates": {
-                        "cone_search_radius": cone[2],
-                        "cone_search_unit": "deg",
-                        "radec": {"object": [cone[0], cone[1]]},
-                    },
-                    "catalogs": {
-                        catalog: {
-                            "filter": filter,
-                            "projection": projection,
-                        }
-                        for catalog in catalogs
-                    },
-                },
-            }
-
-            queries.append(query)
-
-        response = self.query(
-            queries=queries, use_batch_query=True, max_n_threads=max_n_threads
-        )
-
-        candidates_per_catalogs_per_instance = {
-            name: {catalog: [] for catalog in self.instances[name]["catalogs"]}
-            for name in list(self.instances.keys())
-        }
-
-        # first we have on response per query. Each response contains a dict with one key per instance
-        for name in list(response.keys()):
-            for response in response[name]:
-                data = response.get("data", None)
-                if data is None:
-                    continue
-                for catalog in catalogs:
-                    candidates_per_catalogs_per_instance[name][catalog].extend(
-                        data[catalog]["object"]
-                    )
-
-        for name in candidates_per_catalogs_per_instance.keys():  # remove duplicates
-            for catalog in candidates_per_catalogs_per_instance[name].keys():
-                candidates_per_catalogs_per_instance[name][catalog] = list(
-                    {
-                        c["candid"]: c
-                        for c in candidates_per_catalogs_per_instance[name][catalog]
-                    }.values()
-                )
-
-        return candidates_per_catalogs_per_instance

@@ -134,7 +134,7 @@ LICENSE = "MIT"
 URL = "https://github.com/dmitryduev/penquins"
 
 # VERSION should be PEP386 compatible (http://www.python.org/dev/peps/pep-0386)
-VERSION = "2.3.1"
+VERSION = "2.3.2"
 
 # Indicates if this version is a release version
 RELEASE = "dev" not in VERSION
@@ -149,10 +149,6 @@ setup(
     description=DESCRIPTION,
     packages=["penquins"],
     install_requires=[
-        "astropy>=5.2.1",
-        "astropy-healpix>=0.7",
-        "healpy>=1.16.0",
-        "mocpy>=0.11.0",
         "pymongo>=3.10.1",
         "pytest>=5.3.1",
         "requests>=2.25.0",

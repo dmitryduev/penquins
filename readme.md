@@ -245,7 +245,7 @@ for a detailed guide.
 
 ```shell script
 pip install bumpversion
-export PENQUINS_VERSION=2.3.1
+export PENQUINS_VERSION=2.3.2
 
 bumpversion --current-version $PENQUINS_VERSION minor setup.py penquins/penquins.py
 python setup.py sdist bdist_wheel

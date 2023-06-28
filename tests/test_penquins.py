@@ -1,6 +1,3 @@
-import os
-
-from astropy.time import Time
 import pytest
 import random
 
@@ -370,58 +367,6 @@ class TestPenquins:
         assert response["status"] == "success"
         assert response["message"] == f"Removed filter id {filter_id}"
 
-    def test_query_cone_search_from_skymap(self):
-        max_n_threads = 8
-        filename = "localization.fits"
-        path = os.path.join(os.path.dirname(__file__), "data", filename)
-
-        cumprob = 0.7
-        jd_start = Time("2019-01-01").jd
-        jd_end = Time("2020-01-02").jd
-        jdstarthist_start = jd_start
-        jdstarthist_end = jd_end
-        catalogs = ["ZTF_alerts"]
-        program_ids = [1]
-
-        filter_kwargs = {
-            "candidate.drb": {"$gt": 0.8},
-            "candidate.ndethist": {"$gt": 1},
-        }
-
-        projection_kwargs = {
-            "candidate.isdiffpos": 1,
-        }
-
-        candidates_in_skymap_per_instance = self.kowalski.query_skymap(
-            path,
-            cumprob,
-            jd_start,
-            jd_end,
-            jdstarthist_start,
-            jdstarthist_end,
-            catalogs,
-            program_ids,
-            filter_kwargs,
-            projection_kwargs,
-            max_n_threads=max_n_threads,
-        )
-
-        assert len(candidates_in_skymap_per_instance.keys()) > 0
-        assert (
-            self.kowalski.instances.keys() == candidates_in_skymap_per_instance.keys()
-        )
-        for catalog in catalogs:
-            assert catalog in candidates_in_skymap_per_instance["default"].keys()
-            assert len(candidates_in_skymap_per_instance["default"][catalog]) > 0
-            assert all(
-                [
-                    "isdiffpos" in candidate["candidate"].keys()
-                    for candidate in candidates_in_skymap_per_instance["default"][
-                        catalog
-                    ]
-                ]
-            )
-
     def test_cant_add_duplicate_instance(self):
         token = self.kowalski.instances["default"]["token"]
 
@@ -585,3 +530,73 @@ class TestPenquins:
 
         with pytest.raises(ValueError):
             k.query(query=query)
+
+    def test_skymap_query(self):
+        skymap_data = {
+            "ra": 90,
+            "dec": 30,
+            "error": 10,
+        }
+
+        response = self.kowalski.api(
+            "get",
+            "api/skymap",
+            data={
+                "dateobs": "2023-06-23T15:42:26",
+                "localization_name": "90.00000_30.00000_10.00000",
+                "contour": 90,
+            },
+        )
+        if response["status"] != "success":
+            response = self.kowalski.api(
+                "put",
+                "api/skymap",
+                data={
+                    "dateobs": "2023-06-23T15:42:26",
+                    "skymap": skymap_data,
+                    "contours": [90],
+                },
+            )
+            assert response["status"] == "success"
+
+        catalog = "ZTF_alerts"
+        query = {
+            "query_type": "skymap",
+            "query": {
+                "skymap": {
+                    "localization_name": "90.00000_30.00000_10.00000",
+                    "dateobs": "2023-06-23T15:42:26",
+                    "contour": 90,
+                },
+                "catalog": catalog,
+                "filter": {},
+                "projection": {"_id": 0, "objectId": 1},
+            },
+        }
+        response = self.kowalski.query(query=query)
+        assert "default" in response
+        assert "data" in response["default"]
+        assert len(response["default"]["data"]) == 20
+
+        query = {
+            "query_type": "skymap",
+            "query": {
+                "skymap": {
+                    "localization_name": "90.00000_30.00000_10.00000",
+                    "dateobs": "2023-06-23T15:42:26",
+                    "contour": 20,
+                },
+                "catalog": catalog,
+                "filter": {},
+                "projection": {"_id": 0, "objectId": 1},
+            },
+        }
+        response = self.kowalski.query(query=query)
+        assert "default" in response
+        assert "status" in response["default"]
+        assert response["default"]["status"] == "error"
+        assert "message" in response["default"]
+        assert (
+            response["default"]["message"]
+            == "ValueError: Contour level 20 not found in skymap"
+        )
