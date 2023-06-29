@@ -212,8 +212,7 @@ class Kowalski:
             if len(self.instances) > 1:
                 self.multiple_instances = True
 
-            catalogs = self.get_catalogs(name)
-            self.instances[name]["catalogs"] = catalogs
+            self.get_catalogs(name)  # get catalogs for this instance
 
         except Exception as e:
             del self.instances[name]
@@ -420,7 +419,8 @@ class Kowalski:
             },
         }
         response = self.single_query((query, name))
-        return response[name].get("data")
+        self.instances[name]["catalogs"] = response.get(name, {}).get("data", [])
+        return self.instances[name]["catalogs"]
 
     def get_catalogs_all(self) -> dict:
         catalogs = {}
