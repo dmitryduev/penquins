@@ -30,6 +30,28 @@ kowalski = Kowalski(
     port=port
 )
 ```
+*When connecting to only one instance, it will be labeled as "default". Keep this in mind when retrieving the results of your queries.*
+
+Connect to multiple Kowalski instances:
+
+```python
+from penquins import Kowalski
+
+instances = {
+    "name": "kowalski",
+    "host": "<host>",
+    "protocol": https
+    "port": 443,
+    "token": "<token>" # or username and password
+}
+
+kowalski = Kowalski(instances=instances)
+```
+
+*When using multiple instances at once, you can specify a single instance to query using its name when calling `query(name=...)`, or no name at all. If no name is provided and the catalog(s) being queried is/are available on multiple instances, penquins will divide the load between instances automagically.*
+
+*When retrieving the results, you'll have to use the instance(s) name instead of "default", or simply iterate over the results by instance and merge the results.*
+
 
 It is recommended to authenticate once and then just reuse the generated token:
 
@@ -66,7 +88,7 @@ query = {
 }
 
 response = kowalski.query(query=query)
-data = response.get("data")
+data = response.get("default").get("data")
 ```
 
 Query for 7 nearest sources to a sky position, sorted by the spheric distance, with a `near` query:
@@ -92,7 +114,7 @@ query = {
 }
 
 response = kowalski.query(query=query)
-data = response.get("data")
+data = response.get("default").get("data")
 ```
 
 Retrieve available catalog names:
@@ -106,7 +128,7 @@ query = {
 }
 
 response = k.query(query=query)
-data = response.get("data")
+data = response.get("default").get("data")
 ```
 
 Query for 7 nearest sources to a sky position, sorted by the spheric distance, with a `near` query:
@@ -132,7 +154,7 @@ query = {
 }
 
 response = k.query(query=query)
-data = response.get("data")
+data = response.get("default").get("data")
 ```
 
 Run a `cone_search` query:
@@ -168,7 +190,7 @@ query = {
 }
 
 response = kowalski.query(query=query)
-data = response.get("data")
+data = response.get("default").get("data")
 ```
 
 Run a `find` query:
@@ -189,7 +211,7 @@ q = {
 }
 
 response = kowalski.query(query=q)
-data = response.get("data")
+data = response.get("default").get("data")
 ```
 
 Run a batch of queries in parallel:
@@ -212,7 +234,63 @@ queries = [
     for alert in data
 ]
 
-responses = kowalski.batch_query(queries=queries, n_treads=4)
+responses = k.query(queries=queries, use_batch_query=True, max_n_threads=4)
+```
+
+### Querying multiple instances at once
+
+When using multiple instances at once, you can specify a single instance to query using its name when calling `query(name=...)`, or no name at all. If no name is provided, and the catalog(s) being queried is/are available on multiple instances, penquins will divide the load between instances automagically.
+
+When retrieving the results, you'll have to use the instance(s) name instead of "default", or simply iterate over the results by instance and merge the results.
+
+Any of the queries mentioned for single instance querying also work here.
+
+#### Examples
+
+No instance name specified:
+
+```python
+q = {
+    "query_type": "find",
+    "query": {
+        "catalog": "ZTF_alerts",
+        "filter": {
+            "objectId": "ZTF20acfkzcg"
+        },
+        "projection": {
+            "_id": 0,
+            "candid": 1
+        }
+    }
+}
+response = kowalski.query(query=q)
+data = response.get(<instance_name).get("data") # retrieving data from one instance
+
+# OR
+
+data = [] # or {} depending on the query's expected result, differs by query type
+for instance, instance_results in response.items():
+    for result in instance_results:
+        data.append(result.get('data'))
+```
+
+Instance name specified:
+```python
+q = {
+    "query_type": "find",
+    "query": {
+        "catalog": "ZTF_alerts",
+        "filter": {
+            "objectId": "ZTF20acfkzcg"
+        },
+        "projection": {
+            "_id": 0,
+            "candid": 1
+        }
+    }
+}
+response = kowalski.query(query=q, name=<instance_name>)
+data = response.get(<instance_name).get("data") # retrieving data from one instance
 ```
 
 ### Interacting with the API
