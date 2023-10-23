@@ -41,7 +41,7 @@ instances = {
     "kowalski": {
         "name": "kowalski",
         "host": "<host>",
-        "protocol": https
+        "protocol": "https"
         "port": 443,
         "token": "<token>" # or username and password
     },
