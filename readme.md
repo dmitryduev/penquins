@@ -38,11 +38,14 @@ Connect to multiple Kowalski instances:
 from penquins import Kowalski
 
 instances = {
-    "name": "kowalski",
-    "host": "<host>",
-    "protocol": https
-    "port": 443,
-    "token": "<token>" # or username and password
+    "kowalski": {
+        "name": "kowalski",
+        "host": "<host>",
+        "protocol": https
+        "port": 443,
+        "token": "<token>" # or username and password
+    },
+    ...
 }
 
 kowalski = Kowalski(instances=instances)
