@@ -607,16 +607,15 @@ class Kowalski:
 
         with ThreadPool(processes=n_threads) as pool:
             if self.v:
-                return list(
-                    tqdm(
-                        pool.imap(
-                            self.single_query,
-                            queries_name_tpl,
-                            # chunksize=len(queries_name_tpl),
-                        )
-                    )
-                )
-            return list(pool.imap(self.single_query, queries_name_tpl))
+                with tqdm(total=len(queries_name_tpl)) as pbar:
+                    results = []
+                    for result in pool.imap_unordered(
+                        self.single_query, queries_name_tpl
+                    ):
+                        results.append(result)
+                        pbar.update(1)
+                    return results
+            return list(pool.imap_unordered(self.single_query, queries_name_tpl))
 
     def single_query(self, query_tpl: Tuple[Mapping, str]):
         """Call Kowalski's /api/queries endpoint using multiple processes
