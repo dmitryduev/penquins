@@ -2,7 +2,6 @@
 
 __all__ = ["Kowalski", "__version__"]
 
-import os
 import secrets
 import string
 import traceback
@@ -10,6 +9,7 @@ from copy import deepcopy
 from multiprocessing.pool import ThreadPool
 from netrc import netrc
 from typing import Mapping, Optional, Sequence, Union, Tuple
+from urllib.parse import urljoin
 
 import requests
 from bson.json_util import loads
@@ -339,7 +339,7 @@ class Kowalski:
                 )
         try:
             resp = self.instances[name]["session"].get(
-                os.path.join(self.instances[name]["base_url"], ""),
+                urljoin(self.instances[name]["base_url"], ""),
                 headers=self.instances[name]["headers"],
             )
 
@@ -377,13 +377,13 @@ class Kowalski:
 
         if method != "get":
             resp = self.instances[name]["methods"][method](
-                os.path.join(self.instances[name]["base_url"], endpoint),
+                urljoin(self.instances[name]["base_url"], endpoint),
                 json=data,
                 headers=self.instances[name]["headers"],
             )
         else:
             resp = self.instances[name]["methods"][method](
-                os.path.join(self.instances[name]["base_url"], endpoint),
+                urljoin(self.instances[name]["base_url"], endpoint),
                 params=data,
                 headers=self.instances[name]["headers"],
             )
@@ -643,7 +643,7 @@ class Kowalski:
                 _query["kwargs"]["_id"] = _id
 
         resp = self.instances[name]["session"].post(
-            os.path.join(self.instances[name]["base_url"], "api/queries"),
+            urljoin(self.instances[name]["base_url"], "api/queries"),
             json=_query,
             headers=self.instances[name]["headers"],
         )
