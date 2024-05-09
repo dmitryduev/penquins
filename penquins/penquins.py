@@ -174,7 +174,7 @@ class Kowalski:
                 "head": self.instances[name]["session"].head,
             }
             # mount session adapters
-            timeout = kwargs.get("timeout", DEFAULT_TIMEOUT)
+            timeout = cfg.get("timeout", kwargs.get("timeout", DEFAULT_TIMEOUT))
             pool_connections = kwargs.get("pool_connections", DEFAULT_POOLSIZE)
             pool_maxsize = kwargs.get("pool_maxsize", DEFAULT_POOLSIZE)
             max_retries = kwargs.get("max_retries", DEFAULT_RETRIES)
