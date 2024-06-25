@@ -17,7 +17,7 @@ from requests.adapters import DEFAULT_POOLBLOCK, DEFAULT_POOLSIZE, HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 from tqdm.auto import tqdm
 
-__version__ = "2.4.1"
+__version__ = "2.4.2"
 
 Num = Union[int, float]
 
@@ -577,8 +577,15 @@ class Kowalski:
 
     def prepare_queries(self, queries, name=None) -> dict:
         """Based on the catalogs or catalog specified in the queries, split the queries into multiple queries for each instance"""
-        queries_per_instance = {name: [] for name in self.instances.keys()}
-        instances_load = {name: 0 for name in self.instances.keys()}
+        instances_names = list(self.instances.keys())
+        if name is not None:
+            if name not in instances_names:
+                raise ValueError(
+                    f"Instance {name} not found in the list of instances: {instances_names}"
+                )
+            instances_names = [name]
+        queries_per_instance = {instance_name: [] for instance_name in instances_names}
+        instances_load = {instance_name: 0 for instance_name in instances_names}
         for query in queries:
             query_per_instance, instances_load = self.prepare_query(
                 query, name=name, instances_load=instances_load
@@ -708,7 +715,7 @@ class Kowalski:
                 return results
 
         if queries is not None:
-            queries_split_in_queries = self.prepare_queries(queries)
+            queries_split_in_queries = self.prepare_queries(queries, name=name)
             if len(queries_split_in_queries) == 0:
                 raise ValueError(
                     f"No valid queries found in {str(queries)}\n which yielded {str(queries_split_in_queries)}"
